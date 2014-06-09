@@ -27,8 +27,8 @@ the following attributes:
   - votedFor (persistent) - do we need one for each term?
   - commitIndex
   - state - one of `FOLLOWER`, `LEADER`, or `CANDIDATE`
-  - nextIndex[]
-  - matchIndex[]
+  - `nextIndex[]`
+  - `matchIndex[]`
   - log
 
 ### Log

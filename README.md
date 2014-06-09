@@ -8,7 +8,7 @@ This is a self-study project. My goals for this project are
 
 ## RPC
 
-All Remote Procedure Calls will be implemented using Thrift.
+All Remote Procedure Calls will be implemented using Finagle.
 
 ## Classes
 
@@ -68,8 +68,8 @@ Deals with timeouts.
 
 ## Testing
 
-Maybe there is a way to provide a proxy for the sockets so we can simulate
-various network issues _e.g._ lossy, partitions.
+An effort will be made to use dependency injection across the library. This will
+allow tests to provide mocks that can be used to simulate various network failures.
 
 ## Schedule
 

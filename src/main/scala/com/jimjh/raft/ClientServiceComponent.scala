@@ -6,7 +6,7 @@ import com.twitter.util.Future
 
 /** Wrapper for a Client Service.
   *
-  * <p>This looks odd because I am trying to learn the Cake Pattern.</p>
+  * This looks odd because I am trying to learn the Cake Pattern.
   *
   * @author Jim Lim - jim@quixey.com
   */
@@ -18,8 +18,8 @@ trait ClientServiceComponent {
     *
     */
   class ClientService extends Service[HttpRequest, HttpResponse] {
-    override def apply(request: HttpRequest): Future[HttpResponse] =
-      // TODO implement client service
+    override def apply(req: HttpRequest): Future[HttpResponse] =
+    // TODO implement client service
       Future.value(new DefaultHttpResponse(
         req.getProtocolVersion, HttpResponseStatus.OK))
   }

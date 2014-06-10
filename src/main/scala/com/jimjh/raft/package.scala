@@ -8,16 +8,18 @@ package com.jimjh
   */
 package object raft {
 
-  // Configuration "Module" for dependency injection. Not sure if this is a good place for it, but this sure is
+  // Configuration "module" for dependency injection. Not sure if this is a good place for it, but this sure is
   // convenient.
-  object RaftServer
+  class RaftServer(delegate: Application)
     extends ServerComponent
     with ConsensusServiceComponent
-    with ClientServiceComponent {
+    with ClientServiceComponent
+    with LogComponent {
 
     override val server = new Server
     override val consensusService = new ConsensusService
     override val clientService = new ClientService
+    override val log = new Log(delegate)
   }
 
 }

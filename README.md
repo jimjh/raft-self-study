@@ -12,6 +12,9 @@ All Remote Procedure Calls will be implemented using Finagle.
 
 ## Classes
 
+Here's a simplified description of the various classes we will have. In practice, there will be a proliferation of
+traits and classes to enable dependency injection.
+
 ### Client
 
 Makes RPCs to the server to execute some command on the state machine. Details

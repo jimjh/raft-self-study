@@ -11,7 +11,7 @@ package com.jimjh.raft
   * executions of the same command _e.g._ assign unique serial numbers to each
   * command and ignore commands that have been executed.
   *
-  * @author Jim Lim - jim@quixey.com
+  * @author Jim Lim - jim@jimjh.com
   */
 trait Application {
 

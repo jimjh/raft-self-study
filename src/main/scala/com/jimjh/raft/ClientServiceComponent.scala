@@ -8,7 +8,7 @@ import com.twitter.util.Future
   *
   * This looks odd because I am trying to learn the Cake Pattern.
   *
-  * @author Jim Lim - jim@quixey.com
+  * @author Jim Lim - jim@jimjh.com
   */
 trait ClientServiceComponent {
 

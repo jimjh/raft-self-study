@@ -18,11 +18,21 @@ trait LogComponent {
     * - flushing,
     * - recovery etc.
     */
-  class Log(delegate: Application) {
+  class Log(private[this] val _delegate: Application) {
+
+    private[this] var _logs: Seq[LogEntry] = new LogEntry(0, 0, "", Array.empty[String]) :: Nil
 
     /** Forwards `cmd` with `args` to the contained application. */
     protected[raft] def apply(cmd: String, args: Array[String]) =
-      delegate.apply(cmd, args)
+      _delegate.apply(cmd, args)
+
+    protected[raft] def last = _logs.last
   }
+
+  /** An entry in the [[Log]]. */
+  class LogEntry(val term: Long,
+                 val index: Long,
+                 val cmd: String,
+                 val args: Array[String])
 
 }

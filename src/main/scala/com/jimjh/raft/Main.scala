@@ -18,23 +18,18 @@ object Main {
   def main(args: Array[String]) {
     logger.trace("#main started")
 
-    val props1 = new Properties()
-    props1.put("node.id", "localhost:8080")
-    props1.put("peers", "localhost:8081")
+    val servers = (8080 to 8082).map {
+      case port =>
+        val props = new Properties()
+        props.put("node.id", s"localhost:$port")
+        props.put("peers", "localhost:8080,localhost:8081,localhost:8082")
+        val raft = new RaftServer(DummyApplication, props)
+        val server = Thrift.serveIface(s":$port", raft.consensusService)
+        logger.trace(s"launching consensus service @ $port...")
+        raft.consensusService.start()
+        server
+    }
 
-    val raft1 = new RaftServer(DummyApplication, props1)
-    val server1 = Thrift.serveIface(":8080", raft1.consensusService)
-    raft1.consensusService.start()
-
-    val props2 = new Properties()
-    props2.put("node.id", "localhost:8081")
-    props2.put("peers", "localhost:8080")
-
-    val raft2 = new RaftServer(DummyApplication, props2)
-    val server2 = Thrift.serveIface(":8081", raft2.consensusService)
-    raft2.consensusService.start()
-
-    logger.trace("launching consensus service ...")
-    Await.ready(server1)
+    Await.ready(servers.last)
   }
 }

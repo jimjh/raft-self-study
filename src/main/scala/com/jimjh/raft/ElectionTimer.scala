@@ -16,40 +16,41 @@ trait ElectionTimerDelegate {
 /** Resettable timer that controls election timeouts. Thread-safe.
   *
   * Each timeout is randomly chosen from an interval. Provide a delegate object to receive
-  * [[ElectionTimerDelegate#timeout]] calls when the timeout is triggered.
+  * [[ElectionTimerDelegate.timeout( )]] calls when the timeout is triggered.
   *
   * {{{
   *   TIMEOUT_MIN_MS ≤ timeout ≤ TIMEOUT_MIN_MS + TIMEOUT_RANGE_MS
   * }}}
+  *
   * @author Jim Lim - jim@jimjh.com
   */
 class ElectionTimer(private val _delegate: ElectionTimerDelegate) {
 
-  val TIMEOUT_RANGE_MS = 300
+  val TIMEOUT_RANGE_MS = 2000
   val TIMEOUT_MIN_MS = 450
 
-  private[this] val _random: Random = new Random(System.currentTimeMillis())
+  private[this] val _random: Random = new Random()
   private[this] val _scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(1)
   private[this] var _future: Option[ScheduledFuture[_]] = Option.empty
   private[this] val _task: Runnable = new Runnable {
     override def run(): Unit = {
-      _delegate.timeout
+      _delegate.timeout()
     }
   }
 
   /** Cancels any existing tasks and restarts the timer */
-  def start(): ElectionTimer = {
+  def restart(): ElectionTimer = {
     this.synchronized {
-      reset()
+      cancel()
       _future = Some(_scheduler.schedule(_task, timeout, MILLISECONDS))
     }
     this
   }
 
   /** Cancels any existing tasks */
-  def reset(): ElectionTimer = {
+  def cancel(): ElectionTimer = {
     this.synchronized {
-      _future map { _.cancel(true) }
+      _future map (_.cancel(false))
     }
     this
   }

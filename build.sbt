@@ -12,6 +12,8 @@ libraryDependencies += "org.apache.logging.log4j" % "log4j-core" % "2.0-rc1" % "
 
 libraryDependencies += "org.apache.logging.log4j" % "log4j-slf4j-impl" % "2.0-rc1" % "runtime"
 
+libraryDependencies += "org.scalatest" % "scalatest_2.11" % "2.2.0" % "test"
+
 com.twitter.scrooge.ScroogeSBT.newSettings
 
 libraryDependencies ++= Seq(

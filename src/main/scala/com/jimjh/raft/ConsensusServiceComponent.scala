@@ -55,19 +55,19 @@ trait ConsensusServiceComponent {
     }
 
     /** Node ID */
-    private[this] val _id: String = _props getProperty "node.id"
+    private[this] val _id = _props getProperty "node.id"
 
-    private[this] var _state: State = Follower
+    private[this] var _state = Follower
     private[this] val _logger = Logger(LoggerFactory getLogger s"ConsensusService:${_id}")
-    private[this] val _timer: ElectionTimer = new ElectionTimer(this)
-    private[this] var _heartBeat: Option[HeartBeat] = None
+    private[this] val _timer = new ElectionTimer(this)
+    private[this] var _heartBeat = Option.empty[HeartBeat]
 
     /** Map of node IDs to thrift clients */
     private[this] val _peers = extractPeers(_props getProperty "peers")
+    private[this] var _votesReceived = Set.empty[String]
 
     // TODO persistent state
-    private[this] var _term: Term = new Term(0, None)
-    private[this] var _votesReceived: Set[String] = Set.empty[String]
+    private[this] var _term  = new Term(0, None)
 
     def state: State = _state
 

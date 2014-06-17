@@ -23,12 +23,15 @@ package object raft {
     with ClientServiceComponent
     with LogComponent {
 
-    override val server = new Server
-    // XXX what does this do?
+    /* This all looks really odd to me; is it a good idea? */
+
     override val log = new Log(_delegate)
-    override val consensusService = new ConsensusService(_props, log)
     // XXX is this dependency a good idea?
-    override val clientService = new ClientService // XXX maybe pass a read-only interface of the Log?
+    override val consensusService = new ConsensusService(_props, log)
+    // XXX what does this do?
+    override val server = new Server
+    // XXX maybe pass a read-only interface of the Log?
+    override val clientService = new ClientService
   }
 
 }

@@ -1,6 +1,6 @@
 package com.jimjh.raft
 
-import java.util.concurrent.{ScheduledFuture, Executors, ScheduledExecutorService}
+import java.util.concurrent.{ScheduledFuture, Executors}
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import scala.util.Random
 
@@ -11,6 +11,11 @@ import scala.util.Random
 trait ElectionTimerDelegate {
   /** Invoked by the ElectionTimer at timeout. */
   protected[raft] def timeout(): Unit
+}
+
+object ElectionTimerDefaults {
+  val TIMEOUT_RANGE_MS = 2000
+  val TIMEOUT_MIN_MS = 450
 }
 
 /** Resettable timer that controls election timeouts. Thread-safe.
@@ -24,15 +29,14 @@ trait ElectionTimerDelegate {
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class ElectionTimer(private val _delegate: ElectionTimerDelegate) {
+class ElectionTimer(private[this] val _delegate: ElectionTimerDelegate,
+                    val timeoutRangeMs: Int = ElectionTimerDefaults.TIMEOUT_RANGE_MS,
+                    val timeoutMinMs: Int = ElectionTimerDefaults.TIMEOUT_RANGE_MS) {
 
-  val TIMEOUT_RANGE_MS = 2000
-  val TIMEOUT_MIN_MS = 450
-
-  private[this] val _random: Random = new Random()
-  private[this] val _scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(1)
-  private[this] var _future: Option[ScheduledFuture[_]] = Option.empty
-  private[this] val _task: Runnable = new Runnable {
+  private[this] val _random = new Random()
+  private[this] val _scheduler = Executors.newScheduledThreadPool(1)
+  private[this] var _future = Option.empty[ScheduledFuture[_]]
+  private[this] val _task = new Runnable {
     override def run(): Unit = {
       _delegate.timeout()
     }
@@ -55,5 +59,5 @@ class ElectionTimer(private val _delegate: ElectionTimerDelegate) {
     this
   }
 
-  private[this] def timeout = _random.nextInt(TIMEOUT_RANGE_MS) + TIMEOUT_MIN_MS
+  private[this] def timeout = _random.nextInt(timeoutRangeMs) + timeoutMinMs
 }

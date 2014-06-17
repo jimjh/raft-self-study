@@ -7,6 +7,8 @@ import com.jimjh.raft.rpc.{Entry, Vote, RaftConsensusService}
 import java.util.Properties
 import com.twitter.finagle.Thrift
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
+import scala.concurrent.{future, ExecutionContext}
+import ExecutionContext.Implicits.global
 
 /** Wrapper for a Consensus Service.
   *
@@ -149,9 +151,12 @@ trait ConsensusServiceComponent {
       _peers.foreach {
         case (id, client) =>
           _logger.debug(s"Sending RequestVote RPC to $id")
-          client.requestVote(term, _id, logTerm, logIndex)
-            .onSuccess(tallyVotes(id, _))
-            .onFailure(_logger.error(s"RequestVote failure.", _))
+          future {
+            // wrapping it in a future helps to send out requests in quick succession
+            client.requestVote(term, _id, logTerm, logIndex)
+              .onSuccess(tallyVotes(id, _))
+              .onFailure(_logger.error(s"RequestVote failure.", _))
+          }
       }
     }
 

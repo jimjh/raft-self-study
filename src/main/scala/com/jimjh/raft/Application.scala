@@ -21,5 +21,5 @@ trait Application {
     * @param args  array of command arguments
     * @throws RuntimeException on error
     */
-  protected[raft] def apply(cmd: String, args: Array[String])
+  def apply(cmd: String, args: Array[String])
 }

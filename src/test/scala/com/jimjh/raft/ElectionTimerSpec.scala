@@ -15,7 +15,7 @@ class ElectionTimerSpec
   with SpanSugar {
 
   class Delegate extends ElectionTimerDelegate {
-    var triggered = 0
+    @volatile var triggered = 0
 
     def timeout() {
       triggered += 1

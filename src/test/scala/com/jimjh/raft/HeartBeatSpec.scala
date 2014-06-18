@@ -3,6 +3,7 @@ package com.jimjh.raft
 import org.scalatest.{Matchers, FlatSpec}
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.SpanSugar
+import scala.language.reflectiveCalls
 
 /** Specs for the [[HeartBeat]].
   *
@@ -18,8 +19,7 @@ class HeartBeatSpec
 
   trait Fixture {
     val delegate = new HeartBeatDelegate {
-      var triggered = 0
-
+      @volatile var triggered = 0
       override protected[raft] def pulse(term: Long) {
         triggered += 1
       }
@@ -44,16 +44,14 @@ class HeartBeatSpec
 
   it should "trigger regularly even if the delegate is slow" in {
     val delegate = new HeartBeatDelegate {
-      var triggered = 0
-
+      @volatile var triggered = 0
       override protected[raft] def pulse(term: Long) {
         triggered += 1
-        Thread.sleep(5000)
+        Thread.sleep(20000)
       }
     }
     val heartbeat = new HeartBeat(delegate, AnyTerm).start()
-    val pause = 11 * heartbeat.period
-    Thread.sleep(pause)
+    val pause = 30 * heartbeat.period
     eventually(timeout(scaled(pause milliseconds))) {
       delegate.triggered should be >= 10
     }

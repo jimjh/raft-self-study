@@ -20,3 +20,5 @@ libraryDependencies ++= Seq(
   "org.apache.thrift" % "libthrift" % "0.9.1",
   "com.twitter" %% "scrooge-core" % "3.16.0"
 )
+
+scalacOptions ++= Seq("-feature")

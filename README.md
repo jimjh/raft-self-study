@@ -24,7 +24,19 @@ generated using [Scrooge][scrooge], as follows
 
 Here's a simplified description of the various classes and traits I intend to have. In practice, there will be a
 proliferation of traits and classes to enable dependency injection. Refer to the ScalaDoc for a detailed and up-to-date
-description of each class or trait.
+description of each package, class, and trait.
+
+Users of this library are expected to
+
+- provide an application that implements the `Application` trait,
+- provide a logger that implements the slf4j api, and
+- launch instances of `RaftServer`.
+
+ScalaDocs may be generated using
+
+    $ sbt doc
+    
+The [package overview][package.scala] might be a good place to start.
 
 ### Client
 
@@ -42,6 +54,9 @@ candidate states. Servers have the following attributes:
   - `nextIndex[]`
   - `matchIndex[]`
   - log
+  
+Its implementation shall be divided into a `ClientService` (handles RPCs from clients) and a `ConsensusService` (handles
+RPCs between RAFT nodes.)
 
 ### Log
 
@@ -75,12 +90,20 @@ assign unique serial numbers to each command and ignore commands that have been 
 
 ### ElectionTimer
 
-Triggers election timeouts.
+Triggers election timeouts on the server.
+
+### HeartBeat
+
+Triggers periodic heartbeats on the server.
 
 ## Testing
 
 An effort will be made to use dependency injection across the library. This will allow tests to provide mocks that can
 be used to simulate various network failures.
+
+To run the tests, use
+
+    $ sbt test
 
 ## Schedule
 
@@ -98,3 +121,4 @@ be used to simulate various network failures.
   [finagle]: http://twitter.github.io/finagle/
   [thrift]: http://thrift.apache.org/
   [scrooge]: http://twitter.github.io/scrooge/
+  [package.scala]: target/scala-2.10/api/index.html#com.jimjh.raft.package

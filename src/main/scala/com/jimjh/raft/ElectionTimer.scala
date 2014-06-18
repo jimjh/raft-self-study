@@ -21,10 +21,10 @@ object ElectionTimerDefaults {
 /** Resettable timer that controls election timeouts. Thread-safe.
   *
   * Each timeout is randomly chosen from an interval. Provide a delegate object to receive
-  * [[ElectionTimerDelegate.timeout( )]] calls when the timeout is triggered.
+  * [[ElectionTimerDelegate.timeout]] calls when the timeout is triggered.
   *
   * {{{
-  *   TIMEOUT_MIN_MS ≤ timeout ≤ TIMEOUT_MIN_MS + TIMEOUT_RANGE_MS
+  *   TIMEOUT_MIN_MS <= timeout <= TIMEOUT_MIN_MS + TIMEOUT_RANGE_MS
   * }}}
   *
   * @author Jim Lim - jim@jimjh.com
@@ -41,6 +41,13 @@ class ElectionTimer(private[this] val _delegate: ElectionTimerDelegate,
       _delegate.timeout()
     }
   }
+
+  // allow me a little bit of debugging convenience
+  _scheduler.submit(new Runnable {
+    override def run() {
+      Thread.currentThread().setName("raft.ElectionTimer")
+    }
+  })
 
   /** Cancels any existing tasks and restarts the timer */
   def restart(): ElectionTimer = {

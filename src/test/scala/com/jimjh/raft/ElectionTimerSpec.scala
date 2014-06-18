@@ -1,10 +1,10 @@
 package com.jimjh.raft
 
-import org.scalatest.{FlatSpec, Matchers}
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.SpanSugar
+import org.scalatest.{FlatSpec, Matchers}
 
-/** Specs for the [[ElectionTimer]].
+/** Specs for the [[ElectionTimerComponent.ElectionTimer]].
   *
   * @author Jim Lim - jim@jimjh.com
   */
@@ -22,7 +22,7 @@ class ElectionTimerSpec
     }
   }
 
-  trait Fixture {
+  trait Fixture extends ElectionTimerComponent {
     val delegate = new Delegate
     val timer = new ElectionTimer(delegate)
   }

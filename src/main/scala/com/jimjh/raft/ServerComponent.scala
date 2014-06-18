@@ -16,7 +16,10 @@ package com.jimjh.raft
   * @author Jim Lim - jim@jimjh.com
   */
 trait ServerComponent {
-  this: ConsensusServiceComponent with ClientServiceComponent with LogComponent =>
+  this: ConsensusServiceComponent
+    with ClientServiceComponent
+    with LogComponent
+    with ElectionTimerComponent =>
 
   /** RAFT Server */
   val server: Server

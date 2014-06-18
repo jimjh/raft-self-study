@@ -1,14 +1,16 @@
 package com.jimjh.raft
 
-import com.twitter.util.{Try, Promise, Future}
-import org.slf4j.LoggerFactory
-import com.typesafe.scalalogging.slf4j.Logger
-import com.jimjh.raft.rpc.{Entry, Vote, RaftConsensusService}
 import java.util.Properties
-import com.twitter.finagle.Thrift
+
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
-import scala.concurrent.{future, ExecutionContext}
-import ExecutionContext.Implicits.global
+import com.jimjh.raft.rpc.{Entry, RaftConsensusService, Vote}
+import com.twitter.finagle.Thrift
+import com.twitter.util.{Future, Promise, Try}
+import com.typesafe.scalalogging.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.future
 
 /** Wrapper for a Consensus Service.
   *
@@ -26,14 +28,19 @@ trait ConsensusServiceComponent {
     * `FOLLOWER`, `CANDIDATE`, and `LEADER`. The `host:port` of each node will be treated as its
     * node ID _i.e._ each node is expected be restarted with the same `host:port`.
     *
-    * TODO review code for error handling, logging, scala idioms etc.
+    * @note The timer parameter is a bit funky. The constructor needs an [[ElectionTimerComponent.ElectionTimer]]
+    *       instance, whose constructor needs an [[ElectionTimerDelegate]] instance that is, usually, `this`. To work'
+    *       around this problem, I let `timer` be a call-by-name parameter, which will be called exactly once to
+    *       instantiate a private lazy val `_timer`. Refer to [[RaftServer]] for an example.
     *
     * @define assumeLock Assumes that it has a lock on the state of the consensus service.
     * @define takeLock Takes a lock on the state of the consensus service.
     * @param _props configuration options for the consensus service
+    * @param timer provider method that returns an [[ElectionTimerComponent.ElectionTimer]] instance
     */
   class ConsensusService(private[this] val _props: Properties,
-                         private[this] val _log: LogComponent#Log) // XXX this seems like a bad idea
+                         private[this] val _log: LogComponent#Log,
+                         private[this] val timer: => ElectionTimerComponent#ElectionTimer) // #funky
     extends RaftConsensusService[Future]
     with ElectionTimerDelegate
     with HeartBeatDelegate {
@@ -61,15 +68,17 @@ trait ConsensusServiceComponent {
 
     private[this] var _state = Follower
     private[this] val _logger = Logger(LoggerFactory getLogger s"ConsensusService:${_id}")
-    private[this] val _timer = new ElectionTimer(this)
     private[this] var _heartBeat = Option.empty[HeartBeat]
+    private[this] lazy val _timer = timer // #funky
 
     /** Map of node IDs to thrift clients */
     private[this] val _peers = extractPeers(_props getProperty "peers")
+
+    /** Set of peer IDs that voted for this candidate */
     private[this] var _votesReceived = Set.empty[String]
 
     // TODO persistent state
-    private[this] var _term  = new Term(0, None)
+    private[this] var _term = new Term(0, None)
 
     def state: State = _state
 
@@ -123,7 +132,7 @@ trait ConsensusServiceComponent {
 
     /* END RPC API */
 
-    /** Triggered by [[ElectionTimer]].
+    /** Triggered by [[ElectionTimerComponent.ElectionTimer]].
       *
       * $takeLock
       */
@@ -203,7 +212,7 @@ trait ConsensusServiceComponent {
       _timer.cancel()
     }
 
-    /** Starts an election and restarts the [[ElectionTimer]].
+    /** Starts an election and restarts the [[ElectionTimerComponent.ElectionTimer]].
       *
       * $assumeLock
       */

@@ -20,6 +20,7 @@ trait LogComponent {
     */
   class Log(private[this] val _delegate: Application) {
 
+    // TODO persistent state
     private[this] var _logs: Seq[LogEntry] = new LogEntry(0, 0, "", Array.empty[String]) :: Nil
 
     /** Forwards `cmd` with `args` to the contained application. */

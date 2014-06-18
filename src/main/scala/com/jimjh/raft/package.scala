@@ -21,13 +21,14 @@ package object raft {
     extends ServerComponent
     with ConsensusServiceComponent
     with ClientServiceComponent
-    with LogComponent {
+    with LogComponent
+    with ElectionTimerComponent {
 
     /* This all looks really odd to me; is it a good idea? */
 
     override val log = new Log(_delegate)
     // XXX is this dependency a good idea?
-    override val consensusService = new ConsensusService(_props, log)
+    override val consensusService: ConsensusService = new ConsensusService(_props, log, new ElectionTimer(consensusService))
     // XXX what does this do?
     override val server = new Server
     // XXX maybe pass a read-only interface of the Log?

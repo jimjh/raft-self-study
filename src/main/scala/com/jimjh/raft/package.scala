@@ -1,6 +1,8 @@
 package com.jimjh
 
 import java.util.Properties
+import com.twitter.finagle.Thrift
+import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 
 /** Provides an implementation of the RAFT consensus algorithm.
   *
@@ -27,10 +29,18 @@ package object raft {
     /* This all looks really odd to me; is it a good idea? */
 
     override val log = new Log(_delegate)
-    // XXX is this dependency a good idea?
-    override val consensusService: ConsensusService = new ConsensusService(_props, log, new ElectionTimer(consensusService))
+
+    override val consensusService: ConsensusService =
+      new ConsensusService(
+        _props,
+        log,
+        new ElectionTimer(consensusService),
+        Thrift.newIface[FutureIface]
+      )
+
     // XXX what does this do?
     override val server = new Server
+
     // XXX maybe pass a read-only interface of the Log?
     override val clientService = new ClientService
   }

@@ -4,7 +4,6 @@ import java.util.Properties
 
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.jimjh.raft.rpc.{Entry, RaftConsensusService, Vote}
-import com.twitter.finagle.Thrift
 import com.twitter.util.{Future, Promise, Try}
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -36,11 +35,13 @@ trait ConsensusServiceComponent {
     * @define assumeLock Assumes that it has a lock on the state of the consensus service.
     * @define takeLock Takes a lock on the state of the consensus service.
     * @param _props configuration options for the consensus service
-    * @param timer provider method that returns an [[ElectionTimerComponent.ElectionTimer]] instance
+    * @param timer provider function that returns an [[ElectionTimerComponent.ElectionTimer]] instance
+    * @param _newClient factory function that returns a new Thrift RPC client
     */
   class ConsensusService(private[this] val _props: Properties,
                          private[this] val _log: LogComponent#Log,
-                         private[this] val timer: => ElectionTimerComponent#ElectionTimer) // #funky
+                         private[this] val timer: => ElectionTimerComponent#ElectionTimer, // #funky
+                         private[this] val _newClient: String => FutureIface)
     extends RaftConsensusService[Future]
     with ElectionTimerDelegate
     with HeartBeatDelegate {
@@ -306,7 +307,7 @@ trait ConsensusServiceComponent {
       (prop split ",").map {
         case id =>
           val hostport = id.trim
-          val client = Thrift.newIface[FutureIface](hostport)
+          val client = _newClient(hostport)
           (hostport, client)
       }.toMap - _id
     }

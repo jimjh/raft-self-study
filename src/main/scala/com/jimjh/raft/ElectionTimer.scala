@@ -17,12 +17,10 @@ trait ElectionTimerDelegate {
   protected[raft] def timeout(): Unit
 }
 
-object ElectionTimerDefaults {
+trait ElectionTimerComponent {
+
   val TimeoutRangeMs = 2500
   val TimeoutMinMs = 350
-}
-
-trait ElectionTimerComponent {
 
   /** Resettable timer that controls election timeouts. Thread-safe.
     *
@@ -36,8 +34,8 @@ trait ElectionTimerComponent {
     * @author Jim Lim - jim@jimjh.com
     */
   class ElectionTimer(private[this] val _delegate: ElectionTimerDelegate,
-                      val timeoutRangeMs: Int = ElectionTimerDefaults.TimeoutRangeMs,
-                      val timeoutMinMs: Int = ElectionTimerDefaults.TimeoutRangeMs) {
+                      val timeoutRangeMs: Int = TimeoutRangeMs,
+                      val timeoutMinMs: Int = TimeoutRangeMs) {
 
     private[this] val _random = new Random()
     private[this] val _scheduler = Executors.newScheduledThreadPool(1)

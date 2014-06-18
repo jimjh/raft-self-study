@@ -12,6 +12,8 @@ import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
   */
 package object raft {
 
+  type ReturnType = Option[Any]
+
   /** Configuration "module" for dependency injection. Not sure if this is a good place for it, but
     * this sure is convenient.
     *
@@ -45,4 +47,5 @@ package object raft {
     override val clientService = new ClientService
   }
 
+  private[raft] def notNull(x: Any, n: String) = require(null != x, s"$n must not be null.")
 }

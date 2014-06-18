@@ -51,4 +51,33 @@ class ElectionTimerSpec
       delegate.triggered should be(1)
     }
   }
+
+  it should "allow restart even after an exception" in new ElectionTimerComponent {
+
+    object delegate extends ElectionTimerDelegate {
+      @volatile var triggered = 0
+
+      def timeout() {
+        triggered += 1
+        throw new RuntimeException("w")
+      }
+    }
+
+    val timer = new ElectionTimer(delegate)
+    val maxWait = timer.timeoutMinMs + timer.timeoutRangeMs
+
+    timer.restart()
+    eventually(timeout(scaled(maxWait milliseconds))) {
+      delegate.triggered should be(1)
+    }
+
+    timer.restart()
+    eventually(timeout(scaled(maxWait milliseconds))) {
+      delegate.triggered should be(2)
+    }
+  }
+
+  it should "throw an IAE if _delegate is null" in new ElectionTimerComponent {
+    intercept[IllegalArgumentException](new ElectionTimer(null))
+  }
 }

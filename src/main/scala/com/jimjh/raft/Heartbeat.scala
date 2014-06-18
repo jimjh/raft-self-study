@@ -26,14 +26,12 @@ class HeartBeat(private[this] val _delegate: HeartBeatDelegate,
                 private[this] val _term: Long,
                 val period: Int = HeartBeatDefaults.Period) {
 
+  notNull(_delegate, "_delegate")
+
   private[this] val _scheduler = Executors.newScheduledThreadPool(1)
   private[this] var _future = Option.empty[ScheduledFuture[_]]
   private[this] val _task = new Runnable {
-    override def run() {
-      future {
-        _delegate.pulse(_term)
-      }
-    }
+    override def run() = future(_delegate.pulse(_term))
   }
 
   /** ExecutionContext for scala futures */

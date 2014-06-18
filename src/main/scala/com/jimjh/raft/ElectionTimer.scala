@@ -37,17 +37,14 @@ trait ElectionTimerComponent {
                       val timeoutRangeMs: Int = TimeoutRangeMs,
                       val timeoutMinMs: Int = TimeoutRangeMs) {
 
+    notNull(_delegate, "_delegate")
+
     private[this] val _random = new Random()
     private[this] val _scheduler = Executors.newScheduledThreadPool(1)
     private[this] var _future = Option.empty[ScheduledFuture[_]]
     private[this] val _logger = Logger(LoggerFactory getLogger "ElectionTimer")
     private[this] val _task = new Runnable {
-      override def run() {
-        _delegate match {
-          case null => _logger.warn("_delegate is null.")
-          case some => some.timeout()
-        }
-      }
+      override def run() = _delegate.timeout()
     }
 
     // allow me a little bit of debugging convenience

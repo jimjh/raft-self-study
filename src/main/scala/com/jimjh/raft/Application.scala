@@ -21,5 +21,8 @@ trait Application {
     * @param args  array of command arguments
     * @throws RuntimeException on error
     */
-  def apply(cmd: String, args: Array[String])
+  def apply(cmd: String, args: Array[String]): ReturnType
+
+  // TODO this deserves a better return value
+  // TODO exceptions should be forwarded to the client
 }

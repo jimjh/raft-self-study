@@ -32,8 +32,6 @@ trait ConsensusServiceComponent {
     *       around this problem, I let `timer` be a call-by-name parameter, which will be called exactly once to
     *       instantiate a private lazy val `_timer`. Refer to [[RaftServer]] for an example.
     *
-    * @define assumeLock Assumes that it has a lock on the state of the consensus service.
-    * @define takeLock Takes a lock on the state of the consensus service.
     * @param _props configuration options for the consensus service
     * @param timer provider function that returns an [[ElectionTimerComponent.ElectionTimer]] instance
     * @param _newClient factory function that returns a new Thrift RPC client
@@ -45,6 +43,10 @@ trait ConsensusServiceComponent {
     extends RaftConsensusService[Future]
     with ElectionTimerDelegate
     with HeartBeatDelegate {
+
+    notNull(_props, "_props")
+    notNull(_log, "_log")
+    notNull(_newClient, "_newClient")
 
     /** Defines various possible states for the raft server. */
     object State extends Enumeration {
@@ -81,13 +83,36 @@ trait ConsensusServiceComponent {
     // TODO persistent state
     private[this] var _term = new Term(0, None)
 
+    /* TODO keep peer indices
+     * On positive response, (if leader) update index w. max of existing value and new value.
+     * On negative response, (if leader) update index w. min of existing value and new value.
+     * Wrap "appendEntryToPeer" for use by both #pulse and #apply.
+     * Each "peer" should have a host:port and an atomic index.
+     *
+     * TODO keep track of log replication
+     * When an index is increased, check for opportunities to raise commit index.
+     *   Say, required_majority is k. Order indices in descending order, find kth index. This is the commit index.
+     * If commit index is raised, apply additional log entries to the log.
+     * Get a response back to the client.
+     *
+     * TODO implement
+     * on increase index
+     *   if can raise commit index
+     *     raise commit index
+     *     applyUntil(commitIndex)
+     *
+     * class AtomicIndex
+     *   def setAtLeast(n): Boolean
+     *   def setAtMost(n): Boolean
+     *   def get
+     */
+
     def state: State = _state
 
     /* BEGIN RPC API **/
 
     /** Invoked by candidates to gather votes.
       *
-      * $takeLock
       * @return vote
       */
     override def requestVote(term: Long,
@@ -95,22 +120,19 @@ trait ConsensusServiceComponent {
                              lastLogIndex: Long,
                              lastLogTerm: Long): Future[Vote] = {
       _logger.debug(s"Received RequestVote($term, $candidateId, $lastLogIndex, $lastLogTerm)")
-      new Promise(Try {
-        ConsensusService.this.synchronized {
-          if (_term < term) becomeFollower(term)
-          val granted = shouldVote(term, candidateId, lastLogIndex, lastLogTerm)
-          if (granted) {
-            _term.votedFor = Some(candidateId)
-            _timer.restart() // avoid starting an election if one is in progress (optional)
-          }
-          Vote(term, granted)
+      process(term, Vote(term, granted = false)) {
+        if (_term < term) becomeFollower(term)
+        val granted = shouldVote(term, candidateId, lastLogIndex, lastLogTerm)
+        if (granted) {
+          _term.votedFor = Some(candidateId)
+          _timer.restart() // avoid starting an election if one is in progress (optional)
         }
-      })
+        Vote(term, granted)
+      }
     }
 
     /** Invoked by leader to replicate log entries; also acts as heartbeat.
       *
-      * $takeLock
       * @return true iff accepted
       */
     override def appendEntries(term: Long,
@@ -120,40 +142,42 @@ trait ConsensusServiceComponent {
                                entries: Seq[Entry],
                                leaderCommit: Long): Future[Boolean] = {
       _logger.trace(s"Received AppendEntries($term, $leaderId, $prevLogIndex, $prevLogTerm)")
-      new Promise(Try {
-        ConsensusService.this.synchronized {
-          state match {
-            case Follower => updateFollower(term)
-            case Candidate => updateCandidate(term)
-            case Leader => updateLeader(term)
-          }
-        }
-      })
-    }
-
-    /* END RPC API */
-
-    /** Triggered by [[ElectionTimerComponent.ElectionTimer]].
-      *
-      * $takeLock
-      */
-    override def timeout() {
-      this.synchronized {
-        _logger.info(s"Election timeout triggered. Current state is $state for term ${_term}.")
+      process(term, false) {
         state match {
-          case Follower | Candidate => becomeCandidate()
+          case Follower => updateFollower(term)
+          case Candidate => updateCandidate(term)
+          case Leader => updateLeader(term)
         }
       }
     }
 
-    /** Triggered by [[HeartBeat]]. Sends an empty AppendEntries RPC to each node. */
-    override def pulse(term: Long) {
-      _peers.values.foreach(_.appendEntries(term, _id, -1, -1, Nil, -1))
-    }
+    /* END RPC API */
 
+    /** Initializes the consensus service. */
     def start() = {
       _logger.info(s"Starting consensus service - ${_props}")
       _timer.restart()
+    }
+
+    def apply(cmd: String, args: Array[String]) = {
+      val promise = new Promise[ReturnType]()
+      _log.append(_term.term, cmd, args, Some(promise))
+      // TODO kick off a bunch of AppendEntries RPCs, so we don't depend on heartbeats
+      // TODO no need to send heartbeats if we recently sent a legit AppendEntries
+      promise
+    }
+
+    /** Triggered by [[ElectionTimerComponent.ElectionTimer]]. */
+    override protected[raft] def timeout() = synchronized {
+      _logger.info(s"Election timeout triggered. Current state is $state for term ${_term}.")
+      state match {
+        case Follower | Candidate => becomeCandidate()
+      }
+    }
+
+    /** Triggered by [[HeartBeat]]. Sends an empty AppendEntries RPC to each node. */
+    override protected[raft] def pulse(term: Long) {
+      _peers.values.foreach(_.appendEntries(term, _id, -1, -1, Nil, -1))
     }
 
     /** Sends a RequestVote RPC to each node. */
@@ -166,19 +190,19 @@ trait ConsensusServiceComponent {
             client.requestVote(term, _id, logTerm, logIndex)
               .onSuccess(tallyVotes(id, _))
               .onFailure(_logger.error(s"RequestVote failure.", _))
+            // TODO verify that finagle-thrift has a built-in retries w. exponential back-off
           }
       }
     }
 
     /** Adds the given vote to the current tally.
       *
-      * $takeLock
       * @param id   voter ID
       * @param vote (`term`, `granted`)
       */
     private[this] def tallyVotes(id: String, vote: Vote) {
       _logger.debug(s"RequestVote success from $id: $vote")
-      this.synchronized {
+      synchronized {
         if (_state == Candidate && vote == Vote(_term.term, granted = true)) {
           _votesReceived += id
           if (_votesReceived.size >= requiredMajority) becomeLeader()
@@ -187,25 +211,20 @@ trait ConsensusServiceComponent {
     }
 
     /** Starts [[_heartBeat]].
-      * $assumeLock
       *
       * @param term term for each this node holds leadership
       */
-    private[this] def startHeartBeat(term: Long) {
+    private[this] def startHeartBeat(term: Long) = synchronized {
       _heartBeat = Some(new HeartBeat(this, term).start())
     }
 
-    /** $assumeLock */
-    private[this] def stopHeartBeat() {
+    private[this] def stopHeartBeat() = synchronized {
       _heartBeat map (_.cancel())
       _heartBeat = None
     }
 
-    /** Sets state to [[Leader]].
-      *
-      * $assumeLock
-      */
-    private[this] def becomeLeader() {
+    /** Sets state to [[Leader]]. */
+    private[this] def becomeLeader() = synchronized {
       _logger.info(s"(state: ${_state}, term: ${_term}) ~> (state: Leader, term: ${_term})")
 
       _state = Leader
@@ -213,11 +232,8 @@ trait ConsensusServiceComponent {
       _timer.cancel()
     }
 
-    /** Starts an election and restarts the [[ElectionTimerComponent.ElectionTimer]].
-      *
-      * $assumeLock
-      */
-    private[this] def becomeCandidate() {
+    /** Starts an election and restarts the [[ElectionTimerComponent.ElectionTimer]]. */
+    private[this] def becomeCandidate() = synchronized {
       _state = Candidate
       _term = new Term(_term.term + 1, Some(_id))
       _logger.info(s"Starting an election for term ${_term}.")
@@ -230,11 +246,8 @@ trait ConsensusServiceComponent {
       _timer.restart()
     }
 
-    /** Sets state to [[Follower]], resetting the term if necessary.
-      *
-      * $assumeLock
-      */
-    private[this] def becomeFollower(term: Long) {
+    /** Sets state to [[Follower]], resetting the term if necessary. */
+    private[this] def becomeFollower(term: Long) = synchronized {
       _logger.info(s"(state: ${_state}, term: ${_term}) ~> (state: Follower, term: $term)")
 
       _term compare term match {
@@ -248,52 +261,36 @@ trait ConsensusServiceComponent {
       _timer.restart()
     }
 
-    /** $assumeLock */
-    private[this] def updateLeader(term: Long): Boolean = {
-      _term < term match {
+    private[this] def updateLeader(term: Long): Boolean = synchronized {
+      _term.term == term match {
         case true =>
+          _logger.warn(s"Ignoring AppendEntries RPC, since I am the leader for term $term")
+          false
+        case false =>
           becomeFollower(term)
-          true
-        case false => false
+          updateFollower(term)
       }
     }
 
-    /** $assumeLock */
-    private[this] def updateCandidate(term: Long): Boolean = {
-      _term <= term match {
-        case true =>
-          becomeFollower(term)
-          true
-        case false => false
-      }
+    private[this] def updateCandidate(term: Long): Boolean = synchronized {
+      becomeFollower(term)
+      updateFollower(term)
     }
 
-    /** $assumeLock */
-    private[this] def updateFollower(term: Long): Boolean = {
-      _term <= term match {
-        case true =>
-          _timer.restart()
-          true
-        case false => false
-      }
+    private[this] def updateFollower(term: Long): Boolean = synchronized {
+      _timer.restart()
+      true
     }
 
-    /** $assumeLock
-      * @return true iff the given request deserves a vote
-      */
+    /** @return true iff the given request deserves a vote */
     private[this] def shouldVote(term: Long,
                                  candidateId: String,
                                  lastLogIndex: Long,
-                                 lastLogTerm: Long): Boolean = {
-      _term compare term match {
-        case -1 => false // shouldn't happen, since term should have been updated upon receiving the RPC
-        case 0 =>
-          val last = _log.last
-          (_term.votedFor.isEmpty || _term.votedFor == Some(candidateId)) &&
-            lastLogTerm >= last.term &&
-            lastLogIndex >= last.index
-        case 1 => false
-      }
+                                 lastLogTerm: Long): Boolean = synchronized {
+      val last = _log.last
+      (_term.votedFor.isEmpty || _term.votedFor == Some(candidateId)) &&
+        lastLogTerm >= last.term &&
+        lastLogIndex >= last.index
     }
 
     /** @return minimum number of nodes required for majority */
@@ -310,6 +307,17 @@ trait ConsensusServiceComponent {
           val client = _newClient(hostport)
           (hostport, client)
       }.toMap - _id
+    }
+
+    private[this] def process[T](term: Long, resp: T)(f: => T): Promise[T] = {
+      new Promise(Try {
+        synchronized {
+          term < _term.term match {
+            case true => resp
+            case false => f
+          }
+        }
+      })
     }
   }
 

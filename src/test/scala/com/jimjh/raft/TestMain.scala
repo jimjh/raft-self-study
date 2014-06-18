@@ -10,8 +10,9 @@ object TestMain {
   val logger = Logger(LoggerFactory getLogger "main")
 
   object DummyApplication extends Application {
-    override def apply(cmd: String, args: Array[String]) {
+    override def apply(cmd: String, args: Array[String]) = {
       logger.info(s"received cmd: $cmd with args: ${args.mkString(",")}")
+      None
     }
   }
 

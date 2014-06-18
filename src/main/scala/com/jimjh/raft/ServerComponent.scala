@@ -30,11 +30,8 @@ trait ServerComponent {
     * servers.
     */
   class Server {
-
-    // TODO commitIndex
     // TODO nextIndex[]  (maybe group into some "leadership" object?)
     // TODO matchIndex[] (maybe group into some "leadership" object?)
-
   }
 
 }

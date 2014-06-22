@@ -1,7 +1,7 @@
 package com.jimjh.raft
 
-import scala.collection.mutable
 import com.twitter.util.Promise
+
 import scala.language.implicitConversions
 
 /** Cake Wrapper for Log.
@@ -12,10 +12,6 @@ trait LogComponent {
 
   val log: Log
 
-  private val emptyNode = new mutable.LinkedList[LogEntry]()
-
-  implicit def linkedListToSugaredList(list: mutable.LinkedList[LogEntry]) = new SugaredList(list)
-
   /** Manages an ordered list of commands that will be applied on the delegate app. Thread-safe.
     *
     * The log is responsible for
@@ -23,23 +19,27 @@ trait LogComponent {
     * - file I/O,
     * - compaction (snapshotting),
     * - application,
-    * - flushing,
-    * - recovery etc.
+    * - flushing (persistence),
+    * - recovery (persistence).
+    *
+    * I decided to use a DoubleLinkedList for now, because linked lists are easy to persist using append and flush (for
+    * fast disk I/O). We sacrifice random access, but that is rarely used, according to the RAFT paper.
+    *
+    * @todo TODO the locks/volatile here are shit
     */
-  // TODO persistent state
-  private[raft] class Log(private[this] val _delegate: Application) {
+  private[raft] class Log(_delegate: Application) {
 
     notNull(_delegate, "_delegate")
 
     private[this] val _sentinel = new LogEntry(0, 0, "SENTINEL")
-    private[this] val _logs: mutable.LinkedList[LogEntry] = _sentinel !! emptyNode
+    private[this] val _logs = new SugaredList(_sentinel)
 
     @volatile
     private[this] var _last = _logs
 
-    protected[raft] def last = _last.elem
+    protected[raft] def lastEntry = _last.elem
 
-    protected[raft] def lastIndex = last.index
+    protected[raft] def lastIndex = lastEntry.index
 
     /** Write lock - synchronizes access to the `_last` variable and its `next` pointer */
     private[this] val appendLock = new Object()
@@ -84,16 +84,17 @@ trait LogComponent {
         }
       }
 
+    /** Helper method for [[Log.commit]] */
     private[this] def applyUntil(index: Long) = {
+      var result: ReturnType = None
       while (lastApplied < index) {
+        if (_lastApplied.isLast) throw new IllegalStateException("#commit exceeded the end of the _logs list.")
         val next = _lastApplied.next
-        if (next == emptyNode) throw new IllegalStateException("#commit exceeded the end of the _logs list.")
-        next.elem(_delegate) // apply log entry on delegate
+        result = next.elem(_delegate) // apply log entry on delegate
         _lastApplied = next
       }
+      result
     }
-
-    // TODO handle exceptions from application
   }
 
   /** An entry in the [[Log]]. */
@@ -101,10 +102,10 @@ trait LogComponent {
                  val index: Long,
                  val cmd: String,
                  val args: Array[String] = Array.empty[String],
-                 val promise: Option[Promise[ReturnType]] = None) {
-    def !!(next: mutable.LinkedList[LogEntry]) =
-      new mutable.LinkedList[LogEntry](this, next)
+                 val promise: Option[Promise[ReturnType]] = None)
+    extends Ordered[LogEntry] {
 
+    // TODO handle exceptions from application
     /** Forwards `cmd` with `args` to the delegate.
       *
       * If a promise was attached to this log entry, fulfill the promise.
@@ -115,14 +116,28 @@ trait LogComponent {
       promise.map(_.setValue(result))
       result
     }
+
+    override def compare(that: LogEntry) = index compare that.index
   }
 
-  /** Adds a special `!!` operator for append, using the Pimp My Library pattern. */
-  class SugaredList(list: mutable.LinkedList[LogEntry]) {
-    def !!(elem: LogEntry) = {
-      list.next = elem !! emptyNode
-      list.next
+  // TODO persistent state using append, flush
+  class SugaredList(val elem: LogEntry) {
+
+    var next = this
+    var prev: SugaredList = null
+
+    /** Appends `elem` to the list and returns its wrapper node. */
+    def !!(entry: LogEntry) = {
+      next = new SugaredList(entry)
+      next.prev = this
+      next
     }
+
+    def isLast = next eq this
+
+    def term = elem.term
+
+    def index = elem.index
   }
 
 }

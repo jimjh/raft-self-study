@@ -22,8 +22,8 @@ object HeartBeatDefaults {
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class HeartBeat(private[this] val _delegate: HeartBeatDelegate,
-                private[this] val _term: Long,
+class HeartBeat(_delegate: HeartBeatDelegate,
+                _term: Long,
                 val period: Int = HeartBeatDefaults.Period) {
 
   notNull(_delegate, "_delegate")

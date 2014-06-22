@@ -1,8 +1,8 @@
 package com.jimjh.raft
 
-import org.scalatest.{Matchers, FlatSpec}
-import org.scalatest.concurrent.Conductors
 import com.twitter.util.{Await, Promise}
+import org.scalatest.concurrent.Conductors
+import org.scalatest.{FlatSpec, Matchers}
 
 /** Specs for [[LogComponent.Log]]
   *
@@ -37,8 +37,8 @@ class LogSpec
     log.append(AnyTerm, AnyCommand, Array("arg1"))
 
     log.lastIndex should be(1)
-    log.last.cmd should be(AnyCommand)
-    log.last.args should be(Array("arg1"))
+    log.lastEntry.cmd should be(AnyCommand)
+    log.lastEntry.args should be(Array("arg1"))
     log.lastApplied should be(0)
   }
 
@@ -46,7 +46,7 @@ class LogSpec
     (1 until 100).foreach(log.append(_, AnyCommand))
 
     log.lastIndex should be(99)
-    log.last.cmd should be(AnyCommand)
+    log.lastEntry.cmd should be(AnyCommand)
     log.lastApplied should be(0)
   }
 
@@ -123,4 +123,6 @@ class LogSpec
       entry.apply(delegate)
     }
   }
+
+  // TODO tests for #decrement, #term, #index, persistence
 }

@@ -19,6 +19,7 @@ import scala.concurrent.future
   */
 trait ConsensusServiceComponent {
 
+  type Node = RaftConsensusService[Future]
   val consensusService: ConsensusService
 
   /** Responds to RPCs from other servers using the RAFT algorithm.
@@ -36,13 +37,12 @@ trait ConsensusServiceComponent {
     * @param timer provider function that returns an [[ElectionTimerComponent.ElectionTimer]] instance
     * @param _newClient factory function that returns a new Thrift RPC client
     */
-  class ConsensusService(private[this] val _props: Properties,
-                         private[this] val _log: LogComponent#Log,
-                         private[this] val timer: => ElectionTimerComponent#ElectionTimer, // #funky
-                         private[this] val _newClient: String => FutureIface)
-    extends RaftConsensusService[Future]
-    with ElectionTimerDelegate
-    with HeartBeatDelegate {
+  class ConsensusService(_props: Properties,
+                         _log: LogComponent#Log,
+                         timer: => ElectionTimerComponent#ElectionTimer, // #funky
+                         _newClient: String => FutureIface)
+    extends Node
+    with ElectionTimerDelegate {
 
     notNull(_props, "_props")
     notNull(_log, "_log")
@@ -56,14 +56,14 @@ trait ConsensusServiceComponent {
 
     import State._
 
-    class Term(val term: Long, var votedFor: Option[String]) {
-      def <=(other: Long) = term <= other
+    class Term(val num: Long, var votedFor: Option[String]) {
+      def <=(other: Long) = num <= other
 
-      def <(other: Long) = term < other
+      def <(other: Long) = num < other
 
-      def compare(other: Long) = term.compare(other)
+      def compare(other: Long) = num.compare(other)
 
-      override def toString = s"$term"
+      override def toString = s"$num"
     }
 
     /** Node ID */
@@ -71,40 +71,23 @@ trait ConsensusServiceComponent {
 
     private[this] var _state = Follower
     private[this] val _logger = Logger(LoggerFactory getLogger s"ConsensusService:${_id}")
-    private[this] var _heartBeat = Option.empty[HeartBeat]
     private[this] lazy val _timer = timer // #funky
 
-    /** Map of node IDs to thrift clients */
+    /** Map of node IDs to thrift clients. */
     private[this] val _peers = extractPeers(_props getProperty "peers")
 
-    /** Set of peer IDs that voted for this candidate */
+    /** Set of peer IDs that voted for this candidate. */
     private[this] var _votesReceived = Set.empty[String]
 
     // TODO persistent state
     private[this] var _term = new Term(0, None)
 
-    /* TODO keep peer indices
-     * On positive response, (if leader) update index w. max of existing value and new value.
-     * On negative response, (if leader) update index w. min of existing value and new value.
-     * Wrap "appendEntryToPeer" for use by both #pulse and #apply.
-     * Each "peer" should have a host:port and an atomic index.
-     *
-     * TODO keep track of log replication
-     * When an index is increased, check for opportunities to raise commit index.
-     *   Say, required_majority is k. Order indices in descending order, find kth index. This is the commit index.
-     * If commit index is raised, apply additional log entries to the log.
-     * Get a response back to the client.
-     *
-     * TODO implement
-     * on increase index
-     *   if can raise commit index
-     *     raise commit index
-     *     applyUntil(commitIndex)
-     *
-     * class AtomicIndex
-     *   def setAtLeast(n): Boolean
-     *   def setAtMost(n): Boolean
-     *   def get
+    private[this] var _commit = 0
+
+    /* TODO read/write locks?
+     * TODO verify that finagle-thrift has a built-in retries w. exponential back-off
+     * TODO cancel retries for heartbeats
+     * TODO use local proxy objects for dealing w. heartbeat resets, prev index, match index?
      */
 
     def state: State = _state
@@ -161,9 +144,8 @@ trait ConsensusServiceComponent {
 
     def apply(cmd: String, args: Array[String]) = {
       val promise = new Promise[ReturnType]()
-      _log.append(_term.term, cmd, args, Some(promise))
-      // TODO kick off a bunch of AppendEntries RPCs, so we don't depend on heartbeats
-      // TODO no need to send heartbeats if we recently sent a legit AppendEntries
+      _log.append(_term.num, cmd, args, Some(promise))
+      // TODO kick off a bunch of AppendEntries RPCs
       promise
     }
 
@@ -175,22 +157,24 @@ trait ConsensusServiceComponent {
       }
     }
 
-    /** Triggered by [[HeartBeat]]. Sends an empty AppendEntries RPC to each node. */
-    override protected[raft] def pulse(term: Long) {
-      _peers.values.foreach(_.appendEntries(term, _id, -1, -1, Nil, -1))
+    /** Sends a AppendEntries RPC to each node. */
+    private[this] def appendEntriesToPeers() = synchronized {
+      val term = _term.num
+      _peers.values.foreach { node => future {
+        node.sync(_commit)
+      }
+      }
     }
 
     /** Sends a RequestVote RPC to each node. */
     private[this] def requestVotes(term: Long, logTerm: Long, logIndex: Long) {
       _peers.foreach {
-        case (id, client) =>
+        case (id, node) =>
           _logger.debug(s"Sending RequestVote RPC to $id")
           future {
             // wrapping it in a future helps to send out requests in quick succession
-            client.requestVote(term, _id, logTerm, logIndex)
+            node.requestVote(term, _id, logTerm, logIndex)
               .onSuccess(tallyVotes(id, _))
-              .onFailure(_logger.error(s"RequestVote failure.", _))
-            // TODO verify that finagle-thrift has a built-in retries w. exponential back-off
           }
       }
     }
@@ -203,24 +187,20 @@ trait ConsensusServiceComponent {
     private[this] def tallyVotes(id: String, vote: Vote) {
       _logger.debug(s"RequestVote success from $id: $vote")
       synchronized {
-        if (_state == Candidate && vote == Vote(_term.term, granted = true)) {
+        if (_state == Candidate && vote == Vote(_term.num, granted = true)) {
           _votesReceived += id
           if (_votesReceived.size >= requiredMajority) becomeLeader()
         }
       }
     }
 
-    /** Starts [[_heartBeat]].
-      *
-      * @param term term for each this node holds leadership
-      */
+    /** @param term term for each this node holds leadership */
     private[this] def startHeartBeat(term: Long) = synchronized {
-      _heartBeat = Some(new HeartBeat(this, term).start())
+      _peers.values.foreach(_.startHeartBeat(term))
     }
 
     private[this] def stopHeartBeat() = synchronized {
-      _heartBeat map (_.cancel())
-      _heartBeat = None
+      _peers.values.foreach(_.stopHeartBeat())
     }
 
     /** Sets state to [[Leader]]. */
@@ -228,20 +208,20 @@ trait ConsensusServiceComponent {
       _logger.info(s"(state: ${_state}, term: ${_term}) ~> (state: Leader, term: ${_term})")
 
       _state = Leader
-      startHeartBeat(_term.term)
+      startHeartBeat(_term.num)
       _timer.cancel()
     }
 
     /** Starts an election and restarts the [[ElectionTimerComponent.ElectionTimer]]. */
     private[this] def becomeCandidate() = synchronized {
       _state = Candidate
-      _term = new Term(_term.term + 1, Some(_id))
+      _term = new Term(_term.num + 1, Some(_id))
       _logger.info(s"Starting an election for term ${_term}.")
 
       _votesReceived = Set(_id)
 
-      val last = _log.last
-      requestVotes(_term.term, last.term, last.index)
+      val last = _log.lastEntry
+      requestVotes(_term.num, last.term, last.index)
 
       _timer.restart()
     }
@@ -262,7 +242,7 @@ trait ConsensusServiceComponent {
     }
 
     private[this] def updateLeader(term: Long): Boolean = synchronized {
-      _term.term == term match {
+      _term.num == term match {
         case true =>
           _logger.warn(s"Ignoring AppendEntries RPC, since I am the leader for term $term")
           false
@@ -287,7 +267,7 @@ trait ConsensusServiceComponent {
                                  candidateId: String,
                                  lastLogIndex: Long,
                                  lastLogTerm: Long): Boolean = synchronized {
-      val last = _log.last
+      val last = _log.lastEntry
       (_term.votedFor.isEmpty || _term.votedFor == Some(candidateId)) &&
         lastLogTerm >= last.term &&
         lastLogIndex >= last.index
@@ -300,11 +280,11 @@ trait ConsensusServiceComponent {
     /** Converts comma-separated host ports into a map.
       * @return map of `hostport`s to thrift clients
       */
-    private[this] def extractPeers(prop: String): Map[String, RaftConsensusService[Future]] = {
+    private[this] def extractPeers(prop: String): Map[String, Proxy] = {
       (prop split ",").map {
         case id =>
           val hostport = id.trim
-          val client = _newClient(hostport)
+          val client = new Proxy(hostport, _newClient)
           (hostport, client)
       }.toMap - _id
     }
@@ -312,9 +292,10 @@ trait ConsensusServiceComponent {
     private[this] def process[T](term: Long, resp: T)(f: => T): Promise[T] = {
       new Promise(Try {
         synchronized {
-          term < _term.term match {
+          // get a lock on the server state
+          term < _term.num match {
             case true => resp
-            case false => f
+            case false => f // reject requests from stale peers
           }
         }
       })

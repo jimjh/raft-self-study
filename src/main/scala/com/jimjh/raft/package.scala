@@ -1,18 +1,23 @@
 package com.jimjh
 
 import java.util.Properties
-import com.twitter.finagle.Thrift
+
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
+import com.twitter.finagle.Thrift
 
 /** Provides an implementation of the RAFT consensus algorithm.
   *
   * == Overview ==
-  * TODO
+  *
   * @author Jim Lim - jim@jimjh.com
   */
 package object raft {
 
+  // TODO use more immutable objects, functional concurrency
+  // TODO maybe I need monads?
+
   type ReturnType = Option[Any]
+  type LogIndex = LogComponent#SugaredList
 
   /** Configuration "module" for dependency injection. Not sure if this is a good place for it, but
     * this sure is convenient.

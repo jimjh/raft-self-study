@@ -33,7 +33,7 @@ trait ElectionTimerComponent {
     *
     * @author Jim Lim - jim@jimjh.com
     */
-  class ElectionTimer(private[this] val _delegate: ElectionTimerDelegate,
+  class ElectionTimer(_delegate: ElectionTimerDelegate,
                       val timeoutRangeMs: Int = TimeoutRangeMs,
                       val timeoutMinMs: Int = TimeoutRangeMs) {
 

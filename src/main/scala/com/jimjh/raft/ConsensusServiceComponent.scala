@@ -8,8 +8,9 @@ import com.twitter.util.{Future, Promise, Try}
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.future
+import scala.concurrent.{future, promise}
 
 /** Wrapper for a Consensus Service.
   *
@@ -42,6 +43,7 @@ trait ConsensusServiceComponent {
                          timer: => ElectionTimerComponent#ElectionTimer, // #funky
                          _newClient: String => FutureIface)
     extends Node
+    with Leader
     with ElectionTimerDelegate {
 
     notNull(_props, "_props")
@@ -82,12 +84,9 @@ trait ConsensusServiceComponent {
     // TODO persistent state
     private[this] var _term = new Term(0, None)
 
-    private[this] var _commit = 0
+    @volatile private[this] var _commit = 0L
 
     /* TODO read/write locks?
-     * TODO verify that finagle-thrift has a built-in retries w. exponential back-off
-     * TODO cancel retries for heartbeats
-     * TODO use local proxy objects for dealing w. heartbeat resets, prev index, match index?
      */
 
     def state: State = _state
@@ -125,11 +124,12 @@ trait ConsensusServiceComponent {
                                entries: Seq[Entry],
                                leaderCommit: Long): Future[Boolean] = {
       _logger.trace(s"Received AppendEntries($term, $leaderId, $prevLogIndex, $prevLogTerm)")
+      // FIXME why am I not using leaderId?
       process(term, false) {
         state match {
-          case Follower => updateFollower(term)
-          case Candidate => updateCandidate(term)
-          case Leader => updateLeader(term)
+          case Follower => updateFollower(term, prevLogIndex, prevLogTerm, entries)
+          case Candidate => updateCandidate(term, prevLogIndex, prevLogTerm, entries)
+          case Leader => updateLeader(term, prevLogIndex, prevLogTerm, entries)
         }
       }
     }
@@ -139,14 +139,18 @@ trait ConsensusServiceComponent {
     /** Initializes the consensus service. */
     def start() = {
       _logger.info(s"Starting consensus service - ${_props}")
+      _log.start()
       _timer.restart()
     }
 
-    def apply(cmd: String, args: Array[String]) = {
-      val promise = new Promise[ReturnType]()
-      _log.append(_term.num, cmd, args, Some(promise))
-      // TODO kick off a bunch of AppendEntries RPCs
-      promise
+    def apply(cmd: String, args: Seq[String]) = {
+      val p = promise[ReturnType]()
+      _log.append(_term.num, cmd, args, Some(p))
+      p
+    }
+
+    def isLeader: Boolean = synchronized {
+      _state == Leader
     }
 
     /** Triggered by [[ElectionTimerComponent.ElectionTimer]]. */
@@ -157,14 +161,44 @@ trait ConsensusServiceComponent {
       }
     }
 
-    /** Sends a AppendEntries RPC to each node. */
-    private[this] def appendEntriesToPeers() = synchronized {
-      val term = _term.num
-      _peers.values.foreach { node => future {
-        node.sync(_commit)
-      }
+    /* BEGIN Leader API */
+
+    /** Sorted set of match indexes for each peer, stored as (id, match index). */
+    private[this] val _matches = new mutable.TreeSet[(String, Long)]()
+
+    override protected[raft] def commitIndex = _commit
+
+    override protected[raft] def lastLogIndex = _log.last
+
+    override protected[raft] def updateMatchIndex(term: Long, id: String, index: Long) = synchronized {
+      term == _term.num match {
+        case true =>
+          val opt = _matches.find { case (x, _) => x == id}
+          opt match {
+            case Some(p) =>
+              _matches.remove(p)
+            case None =>
+          }
+          _matches.add((id, index))
+          // advance commit
+          val req = requiredMajority - 1 // minus one for the leader
+        val majority = _matches.takeRight(req)
+          if (majority.size >= req) {
+            majority.firstKey match {
+              case (_, i) =>
+                if (i > _commit) {
+                  _logger.info(s"Advancing commit from ${_commit} to $i.")
+                  _commit = i
+                  _log.commitIndex = _commit
+                }
+            }
+          }
+        case false =>
+          _logger.warn(s"Ignoring #updateMatchIndex for expired term: $term.")
       }
     }
+
+    /* END Leader API */
 
     /** Sends a RequestVote RPC to each node. */
     private[this] def requestVotes(term: Long, logTerm: Long, logIndex: Long) {
@@ -194,21 +228,12 @@ trait ConsensusServiceComponent {
       }
     }
 
-    /** @param term term for each this node holds leadership */
-    private[this] def startHeartBeat(term: Long) = synchronized {
-      _peers.values.foreach(_.startHeartBeat(term))
-    }
-
-    private[this] def stopHeartBeat() = synchronized {
-      _peers.values.foreach(_.stopHeartBeat())
-    }
-
     /** Sets state to [[Leader]]. */
     private[this] def becomeLeader() = synchronized {
       _logger.info(s"(state: ${_state}, term: ${_term}) ~> (state: Leader, term: ${_term})")
 
       _state = Leader
-      startHeartBeat(_term.num)
+      _peers.values.foreach(_.acquireTerm(_term.num, this))
       _timer.cancel()
     }
 
@@ -236,30 +261,61 @@ trait ConsensusServiceComponent {
         case 1 => throw new IllegalStateException(s"#becomeFollower($term}) was invoked in term ${_term}.")
       }
 
+      if (isLeader) {
+        _peers.values.foreach(_.releaseTerm())
+        _matches.clear()
+      }
+
       _state = Follower
-      stopHeartBeat() // no-op if not leader
       _timer.restart()
     }
 
-    private[this] def updateLeader(term: Long): Boolean = synchronized {
+    private[this] def updateLeader(term: Long,
+                                   prevLogIndex: Long,
+                                   prevLogTerm: Long,
+                                   entries: Seq[Entry]): Boolean = synchronized {
       _term.num == term match {
         case true =>
           _logger.warn(s"Ignoring AppendEntries RPC, since I am the leader for term $term")
           false
         case false =>
           becomeFollower(term)
-          updateFollower(term)
+          updateFollower(term, prevLogIndex, prevLogTerm, entries)
       }
     }
 
-    private[this] def updateCandidate(term: Long): Boolean = synchronized {
+    private[this] def updateCandidate(term: Long,
+                                      prevLogIndex: Long,
+                                      prevLogTerm: Long,
+                                      entries: Seq[Entry]): Boolean = synchronized {
       becomeFollower(term)
-      updateFollower(term)
+      updateFollower(term, prevLogIndex, prevLogTerm, entries)
     }
 
-    private[this] def updateFollower(term: Long): Boolean = synchronized {
+    private[this] def updateFollower(term: Long,
+                                     prevLogIndex: Long,
+                                     prevLogTerm: Long,
+                                     entries: Seq[Entry]): Boolean = synchronized {
       _timer.restart()
-      true
+
+      // walk backwards until log index is found
+      var last: LogIndex = _log.last
+      while (null != last && last.index > prevLogIndex) last = last.prev
+
+      // compare term
+      val hasMatchingEntry =
+        null != last &&
+          prevLogIndex == last.index &&
+          prevLogTerm == last.term
+
+      hasMatchingEntry match {
+        case true => // accept and update
+          _logger.info(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
+          entries.foreach(entry => _log.append(term, entry.cmd, entry.args, None, last))
+          true
+        case false => // reject
+          false
+      }
     }
 
     /** @return true iff the given request deserves a vote */
@@ -274,8 +330,7 @@ trait ConsensusServiceComponent {
     }
 
     /** @return minimum number of nodes required for majority */
-    private[this] def requiredMajority: Double =
-      (_peers.size + 1.0) / 2.0
+    private[this] def requiredMajority: Int = ((_peers.size + 1.0) / 2.0).ceil.toInt
 
     /** Converts comma-separated host ports into a map.
       * @return map of `hostport`s to thrift clients
@@ -284,7 +339,7 @@ trait ConsensusServiceComponent {
       (prop split ",").map {
         case id =>
           val hostport = id.trim
-          val client = new Proxy(hostport, _newClient)
+          val client = new Proxy(hostport, _newClient(hostport))
           (hostport, client)
       }.toMap - _id
     }

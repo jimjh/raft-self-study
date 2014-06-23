@@ -17,7 +17,6 @@ package object raft {
   // TODO maybe I need monads?
 
   type ReturnType = Option[Any]
-  type LogIndex = LogComponent#SugaredList
 
   /** Configuration "module" for dependency injection. Not sure if this is a good place for it, but
     * this sure is convenient.
@@ -33,8 +32,6 @@ package object raft {
     with LogComponent
     with ElectionTimerComponent {
 
-    /* This all looks really odd to me; is it a good idea? */
-
     override val log = new Log(_delegate)
 
     override val consensusService: ConsensusService =
@@ -44,9 +41,6 @@ package object raft {
         new ElectionTimer(consensusService),
         Thrift.newIface[FutureIface]
       )
-
-    // XXX what does this do?
-    override val server = new Server
 
     // XXX maybe pass a read-only interface of the Log?
     override val clientService = new ClientService

@@ -1,6 +1,7 @@
 package com.jimjh.raft
 
-/** Wrapper for a RAFT server.
+/** Wrapper for a RAFT server. Controls two Finagle Services - one for handling client requests, and one for handling
+  * requests from other servers.
   *
   * It looks odd because I am trying to use the Cake Pattern. It is meant to be used as follows:
   *
@@ -11,7 +12,7 @@ package com.jimjh.raft
   *   with LogComponent
   * }}}
   *
-  * The resulting object will have a `server`, a `consensusService`, a `clientService`, and a `log`.
+  * The resulting object will have a `consensusService`, a `clientService`, and a `log`.
   *
   * @author Jim Lim - jim@jimjh.com
   */
@@ -20,18 +21,4 @@ trait ServerComponent {
     with ClientServiceComponent
     with LogComponent
     with ElectionTimerComponent =>
-
-  /** RAFT Server */
-  val server: Server
-
-  /** RAFT Server
-    *
-    * Controls two Finagle Services - one for handling client requests, and one for handling requests from other
-    * servers.
-    */
-  class Server {
-    // TODO nextIndex[]  (maybe group into some "leadership" object?)
-    // TODO matchIndex[] (maybe group into some "leadership" object?)
-  }
-
 }

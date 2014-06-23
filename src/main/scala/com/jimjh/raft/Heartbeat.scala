@@ -10,7 +10,7 @@ trait HeartBeatDelegate {
   protected[raft] def pulse(term: Long): Unit
 }
 
-object HeartBeatDefaults {
+object HeartBeat {
   val Period = 150
 }
 
@@ -24,7 +24,7 @@ object HeartBeatDefaults {
   */
 class HeartBeat(_delegate: HeartBeatDelegate,
                 _term: Long,
-                val period: Int = HeartBeatDefaults.Period) {
+                val period: Int = HeartBeat.Period) {
 
   notNull(_delegate, "_delegate")
 

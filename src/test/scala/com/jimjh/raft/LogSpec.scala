@@ -1,8 +1,11 @@
 package com.jimjh.raft
 
-import com.twitter.util.{Await, Promise}
-import org.scalatest.concurrent.Conductors
+import org.scalatest.concurrent.{Conductors, Eventually}
+import org.scalatest.time.SpanSugar
 import org.scalatest.{FlatSpec, Matchers}
+
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, promise}
 
 /** Specs for [[LogComponent.Log]]
   *
@@ -11,6 +14,8 @@ import org.scalatest.{FlatSpec, Matchers}
 class LogSpec
   extends FlatSpec
   with Matchers
+  with Eventually
+  with SpanSugar
   with Conductors {
 
 
@@ -23,20 +28,20 @@ class LogSpec
     object delegate extends Application {
       var history = List[String]()
 
-      override def apply(cmd: String, args: Array[String]): Option[Any] = {
+      override def apply(cmd: String, args: Seq[String]): Option[Any] = {
         history = cmd +: history
         None
       }
     }
 
     // test subject
-    val log = new Log(delegate)
+    val log = new Log(delegate).start()
   }
 
   it should "append a new LogEntry" in new Fixture {
     log.append(AnyTerm, AnyCommand, Array("arg1"))
 
-    log.lastIndex should be(1)
+    log.lastIndexNum should be(1)
     log.lastEntry.cmd should be(AnyCommand)
     log.lastEntry.args should be(Array("arg1"))
     log.lastApplied should be(0)
@@ -45,7 +50,7 @@ class LogSpec
   it should "append 100 new log entries" in new Fixture {
     (1 until 100).foreach(log.append(_, AnyCommand))
 
-    log.lastIndex should be(99)
+    log.lastIndexNum should be(99)
     log.lastEntry.cmd should be(AnyCommand)
     log.lastApplied should be(0)
   }
@@ -56,31 +61,27 @@ class LogSpec
     (1 until 100 + 1).foreach(i => log.append(Term, s"command#$i"))
   }
 
-  it should "apply (synchronously) commands up till the commit index" in new PopulatedFixture {
-    val CommitIndex = 93
-    log.commit(CommitIndex)
+  it should "apply (asynchronously) commands up till the commit index" in new PopulatedFixture {
+    val CommitIndex = 93L
+    log.commitIndex = CommitIndex
 
-    log.lastApplied should be(CommitIndex)
-    delegate.history.length should be(CommitIndex)
-    delegate.history.head should be(s"command#$CommitIndex")
+    eventually(timeout(scaled(1000 milliseconds))) {
+      log.lastApplied should be(CommitIndex)
+      delegate.history.length should be(CommitIndex)
+      delegate.history.head should be(s"command#$CommitIndex")
+    }
   }
 
-  it should "throw up an IAE if commit index is out of bounds" in new PopulatedFixture {
-    intercept[IllegalArgumentException](log.commit(PopulateCount + 1))
+  it should "throw up an IAE if commitIndex > lastIndexNum" in new PopulatedFixture {
+    intercept[IllegalArgumentException](log.commitIndex = PopulateCount + 1)
   }
 
-  it should "do nothing if the entries have already been applied" in new PopulatedFixture {
-    val CommitIndex = 50
-    log.commit(CommitIndex)
-    log.commit(CommitIndex)
-
-    log.lastApplied should be(CommitIndex)
-    delegate.history.length should be(CommitIndex)
-    delegate.history.head should be(s"command#$CommitIndex")
+  it should "throw up an IAE if new commitIndex < existing commitIndex" in new PopulatedFixture {
+    log.commitIndex = PopulateCount
+    intercept[IllegalArgumentException](log.commitIndex = PopulateCount - 1)
   }
 
   it should "allow concurrent committing and appending" in new Fixture {
-
     val term = 10
     val count = 100
     val conductor = new Conductor
@@ -95,14 +96,16 @@ class LogSpec
 
     thread("committer") {
       waitForBeat(1)
-      log.commit(count) // commit all
+      log.commitIndex = count // commit all
       waitForBeat(2)
-      log.commit(2 * count) // commit all
+      log.commitIndex = 2 * count // commit all
     }
 
     whenFinished {
-      log.lastApplied should be(2 * count)
-      delegate.history.length should be(2 * count)
+      eventually {
+        log.lastApplied should be(2 * count)
+        delegate.history.length should be(2 * count)
+      }
     }
   }
 
@@ -112,17 +115,55 @@ class LogSpec
 
     import conductor._
 
-    val promise = new Promise[ReturnType]()
-    val entry = log.append(AnyTerm, AnyCommand, Array("arg1"), Some(promise))
+    val p = promise[ReturnType]()
+    val entry = log.append(AnyTerm, AnyCommand, Array("arg1"), Some(p))
 
     thread("reader") {
-      Await.result(promise) should be(None)
+      Await.result(p.future, Duration.Inf) should be(None)
     }
 
     thread("writer") {
-      entry.apply(delegate)
+      entry(delegate)
     }
   }
 
-  // TODO tests for #decrement, #term, #index, persistence
+  it should "update commit index" in new PopulatedFixture {
+    log.commitIndex = 10L
+    log.commitIndex should be(10L)
+  }
+
+  it should "advance a given log index w. a future" in new PopulatedFixture {
+
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    val last = log.last
+    var fulfilled = false
+    last.nextF.map { _ => fulfilled = true}
+
+    fulfilled should be(false)
+    log.append(0, "any.cmd")
+    eventually {
+      fulfilled should be(true)
+    }
+  }
+
+  it should "truncate w. exceptions" in new PopulatedFixture {
+
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    // attach a hook to the last entry's next ptr
+    val last = log.last
+
+    @volatile var fulfilled = 0
+    last.nextF
+      .map { _ => fulfilled = 1}
+      .onFailure { case _ => fulfilled = 2}
+
+    // truncate
+    val prev = last.prev
+    log.append(0, "any.cmd", Array.empty[String], None, prev)
+    eventually {
+      fulfilled should be(2)
+    }
+  }
 }

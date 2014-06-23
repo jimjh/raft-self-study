@@ -6,6 +6,24 @@ import com.twitter.util.Future
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import scala.concurrent.ExecutionContext.Implicits.global
+
+trait Leader {
+  /** Index of the last log entry in the leader's log. */
+  protected[raft] def lastLogIndex: LogIndex
+
+  /** @return commit index */
+  protected[raft] def commitIndex: Long
+
+  /** Tells the leader that a peer's match index has been advanced.
+    *
+    * @param term leadership term number
+    * @param id ID of the node this proxy represents
+    * @param index new match index
+    */
+  protected[raft] def updateMatchIndex(term: Long, id: String, index: Long): Unit
+}
+
 /** Local proxy object for wrapping calls to remote nodes.
   *
   * The proxy is responsible for
@@ -15,17 +33,17 @@ import org.slf4j.LoggerFactory
   * - keeping track of next index, match index
   */
 class Proxy(_id: String,
-            _newClient: String => FutureIface)
+            _client: FutureIface)
   extends HeartBeatDelegate {
 
-  // TODO initialize nextIndex, matchIndex
   // TODO reset heartbeats if append entries were sent
+  // TODO use a different log interface
+  // TODO verify that finagle-thrift has a built-in retries w. exponential back-off
+  // TODO cancel retries for heartbeats
 
   private[this] val _logger = Logger(LoggerFactory getLogger "Proxy")
-  private[this] val _client = _newClient(_id)
   private[this] var _heartBeat = Option.empty[HeartBeat]
-
-  private[this] var _term = Option.empty[Term]
+  private[this] var _term = Option.empty[Long]
 
   /** Triggered by [[HeartBeat]]. Sends an empty AppendEntries RPC to each node. */
   override protected[raft] def pulse(term: Long) {
@@ -33,29 +51,17 @@ class Proxy(_id: String,
     _client.appendEntries(term, _id, -1, -1, Nil, -1)
   }
 
-  /** Starts [[_heartBeat]]. Any existing heartbeats are canceled.
-    *
-    * @param term term for each the owner holds leadership
-    */
-  protected[raft] def startHeartBeat(term: Long) = synchronized {
-    stopHeartBeat()
-    _heartBeat = Some(new HeartBeat(this, term).start())
-  }
-
-  /** Stops [[_heartBeat]], if any. */
-  protected[raft] def stopHeartBeat() = synchronized {
-    _heartBeat map (_.cancel())
-    _heartBeat = None
+  /** Acquire leadership. */
+  protected[raft] def acquireTerm(num: Long, leader: Leader) = synchronized {
+    _term = Some(num)
+    startHeartBeat(num)
+    sync(Term(num, leader, leader.lastLogIndex))
   }
 
   /** Release leadership. */
   protected[raft] def releaseTerm() = synchronized {
     _term = None
-  }
-
-  /** Acquire leadership. */
-  protected[raft] def acquireTerm(num: Long, lastIndex: LogIndex) = synchronized {
-    _term = Some(new Term(num, lastIndex, 0))
+    stopHeartBeat()
   }
 
   protected[raft] def requestVote(term: Long,
@@ -78,58 +84,72 @@ class Proxy(_id: String,
       .onFailure(_logger.error(s"AppendEntries failure.", _))
   }
 
-  /** Sends an AppendEntries RPC to this node. */
-  protected[raft] def sync(commitIndex: Long) = synchronized {
-    _term.map { term =>
-      val prevIndex = term.prevIndex
-      val nextIndex = prevIndex.next // FIXME lock? check for tail?
-    val entry = Entry(nextIndex.elem.cmd, nextIndex.elem.args)
+  private[this] def sync(term: Term): Unit = synchronized {
+    val prevIndex = term.prevIndex
+    val nextIndex = prevIndex.nextF
+    nextIndex.map { next => // TODO deal w. truncation
+      val entry = Entry(next.elem.cmd, next.elem.args)
+      val commitIndex = term.leader.commitIndex
       appendEntries(term.num, _id, prevIndex.index, prevIndex.term, List(entry), commitIndex)
-        .onSuccess(afterSync(term.num, nextIndex, _))
+        .onSuccess(onSuccessfulAppend(term, next, _))
     }
   }
 
-  /** Adds the given append response to the current tally. */
-  private[this] def afterSync(num: Long, index: LogIndex, accepted: Boolean) = synchronized {
-    accepted match {
+  /** Adds the given append response to the current tally.
+    *
+    * @param index index of the log entry that was sent
+    */
+  private[this] def onSuccessfulAppend(term: Term,
+                                       index: LogIndex,
+                                       accepted: Boolean) = synchronized {
+    val t = accepted match {
       case true =>
-        _term.map(_.advanceIndices(num, index))
-      // TODO update commit index, apply log
+        val t = term.advanceIndices(index)
+        t.leader.updateMatchIndex(t.num, _id, t.matchIndex)
+        t
       case false =>
-        _term.map(_.retreatIndices(num, index))
-      // TODO resend RPC
+        term.retreatIndices(index)
     }
+    _term.map { num => if (num == t.num) sync(t)}
   }
 
-  /**
-   * @param prevIndex index just before nextIndex
-   * @param matchIndex index of the highest log entry known to be replicated
-   */
-  class Term(val num: Long,
-             var prevIndex: LogIndex,
-             var matchIndex: Long) {
+  /** Starts [[_heartBeat]]. Any existing heartbeats are canceled.
+    *
+    * @param term term for each the owner holds leadership
+    */
+  private[this] def startHeartBeat(term: Long) = synchronized {
+    stopHeartBeat()
+    _heartBeat = Some(new HeartBeat(this, term).start())
+  }
 
-    /** Updates both `prevIndex` and `matchIndex`.
+  /** Stops [[_heartBeat]], if any. */
+  private[this] def stopHeartBeat() = synchronized {
+    _heartBeat map (_.cancel())
+    _heartBeat = None
+  }
+
+  case class Term(num: Long,
+                  leader: Leader,
+                  prevIndex: LogIndex,
+                  matchIndex: Long = 0L) {
+
+    /** Creates a copy with [[prevIndex]] and [[matchIndex]] advanced.
       *
-      * @param reqNum    term number of the AppendEntries request
-      * @param nextIndex index of the last log entry accepted
+      * @param nextIndex index of the last log entry
       */
-    def advanceIndices(reqNum: Long, nextIndex: LogIndex) {
-      if (reqNum == num) {
-        prevIndex = List(prevIndex, nextIndex).max
-        matchIndex = List(matchIndex, nextIndex.index).max
-      }
+    def advanceIndices(nextIndex: LogIndex) = {
+      val p = List(prevIndex, nextIndex).max
+      val m = List(matchIndex, nextIndex.index).max
+      Term(num, leader, p, m)
     }
 
-    /** Updates `prevIndex` to decrement it.
+    /** Creates a copy with [[prevIndex]] retreated.
       *
-      * @param reqNum     term number of the AppendEntries request
-      * @param nextIndex  index of the last log entry rejected
+      * @param nextIndex  index of the last log entry
       */
-    def retreatIndices(reqNum: Long, nextIndex: LogIndex) {
-      if (reqNum == num) {
-        prevIndex = List(prevIndex, nextIndex.prev).min
-      }
+    def retreatIndices(nextIndex: LogIndex) = {
+      val p = List(prevIndex, nextIndex.prev).min
+      Term(num, leader, p, matchIndex)
     }
   }
 

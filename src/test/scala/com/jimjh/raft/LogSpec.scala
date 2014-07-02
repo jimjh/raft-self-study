@@ -41,17 +41,17 @@ class LogSpec
   it should "append a new LogEntry" in new Fixture {
     log.append(AnyTerm, AnyCommand, Array("arg1"))
 
-    log.lastIndexNum should be(1)
-    log.lastEntry.cmd should be(AnyCommand)
-    log.lastEntry.args should be(Array("arg1"))
+    log.lastIndex should be(1)
+    log.last.cmd should be(AnyCommand)
+    log.last.args should be(Array("arg1"))
     log.lastApplied should be(0)
   }
 
   it should "append 100 new log entries" in new Fixture {
     (1 until 100).foreach(log.append(_, AnyCommand))
 
-    log.lastIndexNum should be(99)
-    log.lastEntry.cmd should be(AnyCommand)
+    log.lastIndex should be(99)
+    log.last.cmd should be(AnyCommand)
     log.lastApplied should be(0)
   }
 

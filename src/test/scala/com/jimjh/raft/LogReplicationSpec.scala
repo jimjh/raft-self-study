@@ -3,7 +3,8 @@ package com.jimjh.raft
 import com.jimjh.raft.spec.Harness
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.SpanSugar
-import org.scalatest.{Matchers, FlatSpec}
+import org.scalatest.{FlatSpec, Matchers}
+
 import scala.util.Random
 
 /** Specs for the Log Replication feature.
@@ -58,7 +59,7 @@ class LogReplicationSpec
     eventually(timeout(scaled(pause milliseconds))) {
       rafts.foreach {
         raft =>
-          raft.consensusService.lastLogIndex.elem.cmd should equal(command)
+          raft.consensusService.lastLogEntry.cmd should equal(command)
       }
     }
   }

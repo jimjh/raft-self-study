@@ -1,5 +1,7 @@
 package com.jimjh.raft
 
+import com.jimjh.raft.log.LogComponent
+
 /** Wrapper for a RAFT server. Controls two Finagle Services - one for handling client requests, and one for handling
   * requests from other servers.
   *

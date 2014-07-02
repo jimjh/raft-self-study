@@ -7,7 +7,7 @@ import scala.concurrent.{ExecutionContext, future}
 
 trait HeartBeatDelegate {
   /** Invoked by the HeartBeat at timeout. */
-  protected[raft] def pulse(term: Long): Unit
+  def pulse(term: Long): Unit
 }
 
 object HeartBeat {

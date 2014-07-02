@@ -2,6 +2,9 @@ package com.jimjh.raft
 
 import java.util.Properties
 
+import com.jimjh.raft.State._
+import com.jimjh.raft.leadership.Leader
+import com.jimjh.raft.log.LogComponent
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.jimjh.raft.rpc.{Entry, RaftConsensusService, Vote}
 import com.twitter.finagle.Thrift
@@ -9,7 +12,6 @@ import com.twitter.util.{Future, Promise, Try}
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{future, promise}
 
@@ -54,14 +56,6 @@ trait ConsensusServiceComponent {
     notNull(_log, "_log")
     notNull(_newClient, "_newClient")
 
-    /** Defines various possible states for the raft server. */
-    object State extends Enumeration {
-      type State = Value
-      val Follower, Candidate, Leader = Value
-    }
-
-    import State._
-
     class Term(val num: Long, var votedFor: Option[String]) {
       def <=(other: Long) = num <= other
 
@@ -90,10 +84,15 @@ trait ConsensusServiceComponent {
 
     @volatile private[this] var _commit = 0L
 
-    /* TODO read/write locks?
-     */
-
     def state: State = _state
+
+    override def commit = _commit
+
+    override def termNum = _term.num
+
+    override def lastLogEntry = _log.last
+
+    override protected def logger = _logger
 
     /* BEGIN RPC API **/
 
@@ -152,7 +151,7 @@ trait ConsensusServiceComponent {
 
     def apply(cmd: String, args: Seq[String]) = {
       val p = promise[ReturnType]()
-      _log.append(_term.num, cmd, args, Some(p))
+      _log.append(termNum, cmd, args, Some(p))
       p
     }
 
@@ -160,52 +159,21 @@ trait ConsensusServiceComponent {
       _state == Leader
     }
 
+    override def commit_=(index: Long) = synchronized {
+      if (index > _commit) {
+        logger.info(s"Advancing commit from $commit to $index.")
+        _commit = index
+        _log.commitIndex = _commit
+      }
+    }
+
     /** Triggered by [[ElectionTimerComponent.ElectionTimer]]. */
-    override protected[raft] def timeout() = synchronized {
+    override def timeout() = synchronized {
       _logger.info(s"Election timeout triggered. Current state is $state for term ${_term}.")
       state match {
         case Follower | Candidate => becomeCandidate()
       }
     }
-
-    /* BEGIN Leader API */
-
-    /** Sorted set of match indexes for each peer, stored as (id, match index). */
-    private[this] val _matches = new mutable.TreeSet[(String, Long)]()
-
-    override protected[raft] def commitIndex = _commit
-
-    override protected[raft] def lastLogIndex = _log.last
-
-    override protected[raft] def updateMatchIndex(term: Long, id: String, index: Long) = synchronized {
-      term == _term.num match {
-        case true =>
-          val opt = _matches.find { case (x, _) => x == id}
-          opt match {
-            case Some(p) =>
-              _matches.remove(p)
-            case None =>
-          }
-          _matches.add((id, index))
-          // advance commit
-          val req = requiredMajority - 1 // minus one for the leader
-        val majority = _matches.takeRight(req)
-          if (majority.size >= req) {
-            majority.firstKey match {
-              case (_, i) =>
-                if (i > _commit) {
-                  _logger.info(s"Advancing commit from ${_commit} to $i.")
-                  _commit = i
-                  _log.commitIndex = _commit
-                }
-            }
-          }
-        case false =>
-          _logger.warn(s"Ignoring #updateMatchIndex for expired term: $term.")
-      }
-    }
-
-    /* END Leader API */
 
     /** Sends a RequestVote RPC to each node. */
     private[this] def requestVotes(term: Long, logTerm: Long, logIndex: Long) {
@@ -252,7 +220,7 @@ trait ConsensusServiceComponent {
 
       _votesReceived = Set(_id)
 
-      val last = _log.lastEntry
+      val last = _log.last
       requestVotes(_term.num, last.term, last.index)
 
       _timer.restart()
@@ -270,7 +238,7 @@ trait ConsensusServiceComponent {
 
       if (isLeader) {
         _peers.values.foreach(_.releaseTerm())
-        _matches.clear()
+        resetMatch()
       }
 
       _state = Follower
@@ -306,7 +274,7 @@ trait ConsensusServiceComponent {
       _timer.restart()
 
       // walk backwards until log index is found
-      var last: LogIndex = _log.last
+      var last = lastLogEntry
       while (null != last && last.index > prevLogIndex) last = last.prev
 
       // compare term
@@ -330,23 +298,23 @@ trait ConsensusServiceComponent {
                                  candidateId: String,
                                  lastLogIndex: Long,
                                  lastLogTerm: Long): Boolean = synchronized {
-      val last = _log.lastEntry
+      val last = lastLogEntry
       (_term.votedFor.isEmpty || _term.votedFor == Some(candidateId)) &&
         lastLogTerm >= last.term &&
         lastLogIndex >= last.index
     }
 
     /** @return minimum number of nodes required for majority */
-    private[this] def requiredMajority: Int = ((_peers.size + 1.0) / 2.0).ceil.toInt
+    override def requiredMajority: Int = ((_peers.size + 1.0) / 2.0).ceil.toInt
 
     /** Converts comma-separated host ports into a map.
       * @return map of `hostport`s to thrift clients
       */
-    private[this] def extractPeers(prop: String): Map[String, Proxy] = {
+    private[this] def extractPeers(prop: String): Map[String, leadership.Proxy] = {
       (prop split ",").map {
         case id =>
           val hostport = id.trim
-          val client = new Proxy(hostport, _newClient(hostport))
+          val client = new leadership.Proxy(hostport, _newClient(hostport))
           (hostport, client)
       }.toMap - _id
     }

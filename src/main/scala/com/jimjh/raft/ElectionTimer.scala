@@ -14,7 +14,7 @@ import scala.util.Random
   */
 trait ElectionTimerDelegate {
   /** Invoked by the ElectionTimer at timeout. */
-  protected[raft] def timeout(): Unit
+  def timeout(): Unit
 }
 
 trait ElectionTimerComponent {

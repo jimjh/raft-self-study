@@ -2,6 +2,7 @@ package com.jimjh
 
 import java.util.Properties
 
+import com.jimjh.raft.log.LogComponent
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.twitter.finagle.Thrift
 
@@ -15,6 +16,9 @@ package object raft {
 
   // TODO use more immutable objects, functional concurrency
   // TODO maybe I need monads?
+  // TODO improve dependency injection, define public API, subclassing
+  // TODO annotate methods that are open for tests only
+  // TODO update scaladocs
 
   type ReturnType = Option[Any]
 
@@ -44,6 +48,11 @@ package object raft {
 
     // XXX maybe pass a read-only interface of the Log?
     override val clientService = new ClientService
+
+    def start() = {
+      consensusService.start()
+      this
+    }
   }
 
   private[raft] def notNull(x: Any, n: String) = require(null != x, s"$n must not be null.")

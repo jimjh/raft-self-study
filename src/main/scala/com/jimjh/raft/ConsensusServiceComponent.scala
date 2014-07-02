@@ -4,6 +4,7 @@ import java.util.Properties
 
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.jimjh.raft.rpc.{Entry, RaftConsensusService, Vote}
+import com.twitter.finagle.Thrift
 import com.twitter.util.{Future, Promise, Try}
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -20,8 +21,11 @@ import scala.concurrent.{future, promise}
   */
 trait ConsensusServiceComponent {
 
-  type Node = RaftConsensusService[Future]
+  private[this] type Node = RaftConsensusService[Future]
+
   val consensusService: ConsensusService
+
+  def isLeader: Boolean = consensusService.isLeader
 
   /** Responds to RPCs from other servers using the RAFT algorithm.
     *
@@ -125,6 +129,7 @@ trait ConsensusServiceComponent {
                                leaderCommit: Long): Future[Boolean] = {
       _logger.trace(s"Received AppendEntries($term, $leaderId, $prevLogIndex, $prevLogTerm)")
       // FIXME why am I not using leaderId?
+      // TODO use leaderCommit
       process(term, false) {
         state match {
           case Follower => updateFollower(term, prevLogIndex, prevLogTerm, entries)
@@ -138,9 +143,11 @@ trait ConsensusServiceComponent {
 
     /** Initializes the consensus service. */
     def start() = {
+      val server = Thrift.serveIface(_id, this)
       _logger.info(s"Starting consensus service - ${_props}")
       _log.start()
       _timer.restart()
+      server
     }
 
     def apply(cmd: String, args: Seq[String]) = {

@@ -20,6 +20,9 @@ object HeartBeat {
   * thread from a cached thread pool. Every pulse must terminate within 2 heartbeats in order to guarantee regular
   * heartbeats. If pulses block, new threads need to be created, which may cause performance to degrade over time.
   *
+  * @param _delegate leader, or other object to react to heartbeats
+  * @param _term term number
+  * @param period number of milliseconds between heartbeats
   * @author Jim Lim - jim@jimjh.com
   */
 class HeartBeat(_delegate: HeartBeatDelegate,

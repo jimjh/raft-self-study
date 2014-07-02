@@ -92,6 +92,7 @@ class Proxy(_id: String,
       val commitIndex = term.leader.commitIndex
       appendEntries(term.num, _id, prevIndex.index, prevIndex.term, List(entry), commitIndex)
         .onSuccess(onSuccessfulAppend(term, next, _))
+        .onFailure(e => _logger.warn(s"Failed to sync after log index ${prevIndex.index}.", e))
     }
   }
 

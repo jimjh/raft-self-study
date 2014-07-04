@@ -1,6 +1,6 @@
-package com.jimjh.raft
+package com.jimjh.raft.log
 
-import com.jimjh.raft.log.LogComponent
+import com.jimjh.raft._
 import com.jimjh.raft.spec.UnitSpec
 
 import scala.concurrent.duration.Duration

@@ -8,6 +8,9 @@ import scala.language.postfixOps
 
 /** Skeletal implementation of a linked list.
   *
+  * Only nextF and nextP may be mutable. All other fields, including prev, are immutable. The start of the list is
+  * called a _sentinel_, which is a special entry that points to itself.
+  *
   * @todo TODO persistent state using append, flush
   * @todo TODO initialize from persisted state
   *
@@ -27,9 +30,6 @@ class LogEntry(val term: Long,
   @volatile
   private[this] var _nextP = promise[LogEntry]()
 
-  @volatile
-  private[this] var _nextF: Future[LogEntry] = _nextP.future
-
   override def compare(other: LogEntry) = index compare other.index
 
   /** Appends `elem` to the list and returns its wrapper node. */
@@ -46,7 +46,7 @@ class LogEntry(val term: Long,
 
   def nextP = _nextP
 
-  def nextF = _nextF
+  def nextF = _nextP.future
 
   /** @return true iff this entry is the last entry */
   def isLast = !nextF.isCompleted
@@ -65,17 +65,17 @@ class LogEntry(val term: Long,
     result
   }
 
-  def prev = _prev
+  /** @return previous log entry */
+  protected[raft] def prev = _prev
 
   private[this] def truncate() {
     var ptr = this
     while (!ptr.isLast) ptr = Await.result(ptr.nextF, 0 nanos)
     ptr.nextP.failure(new TruncatedLogException)
     _nextP = promise[LogEntry]()
-    _nextF = _nextP.future
   }
 
-  private[LogEntry] def prev_=(e: LogEntry) =_prev = e
+  private[LogEntry] def prev_=(e: LogEntry) = _prev = e
 }
 
 object LogEntry {
@@ -87,7 +87,8 @@ object LogEntry {
             prev: LogEntry = sentinel) =
     new LogEntry(term, index, cmd, args, result, prev)
 
-  def sentinel = {
+  /** @return sentinel entry that points to itself */
+  def sentinel: LogEntry = {
     val s: LogEntry = new LogEntry(0, 0, "SENTINEL", Nil, None, null)
     s.prev = s
     s

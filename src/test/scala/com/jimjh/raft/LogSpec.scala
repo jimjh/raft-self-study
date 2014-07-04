@@ -1,8 +1,7 @@
 package com.jimjh.raft
 
-import org.scalatest.concurrent.{Conductors, Eventually}
-import org.scalatest.time.SpanSugar
-import org.scalatest.{FlatSpec, Matchers}
+import com.jimjh.raft.log.LogComponent
+import com.jimjh.raft.spec.UnitSpec
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, promise}
@@ -11,12 +10,7 @@ import scala.concurrent.{Await, promise}
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class LogSpec
-  extends FlatSpec
-  with Matchers
-  with Eventually
-  with SpanSugar
-  with Conductors {
+class LogSpec extends UnitSpec {
 
 
   trait Fixture extends LogComponent {
@@ -154,7 +148,9 @@ class LogSpec
     // attach a hook to the last entry's next ptr
     val last = log.last
 
-    @volatile var fulfilled = 0
+    @volatile
+    var fulfilled = 0
+
     last.nextF
       .map { _ => fulfilled = 1}
       .onFailure { case _ => fulfilled = 2}

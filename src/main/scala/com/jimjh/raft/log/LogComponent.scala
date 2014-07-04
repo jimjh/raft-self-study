@@ -49,7 +49,7 @@ trait LogComponent {
     private[this] val _logger = Logger(LoggerFactory getLogger "Log")
 
     /** Serializable sequence of log entries. */
-    private[this] val _logs = new LogEntry(0, 0, "SENTINEL")
+    private[this] val _logs = LogEntry.sentinel
 
     /** Write lock for [[_commitIndex]]. */
     private[this] val _commitLock = new ReentrantLock()
@@ -106,6 +106,16 @@ trait LogComponent {
       _logs.synchronized {
         _last = index <<(term, lastIndex + 1, cmd, args, promise)
         _last
+      }
+    }
+
+    /** @return last log entry with a match index and term */
+    def findLast(index: Long, term: Long): Option[LogEntry] = {
+      var entry = last
+      while (entry.index > 0 && entry.index > index) entry = entry.prev
+      entry.index == index && entry.term == term match {
+        case true => Some(entry)
+        case false => None
       }
     }
 

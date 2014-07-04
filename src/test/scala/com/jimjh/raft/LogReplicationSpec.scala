@@ -1,9 +1,6 @@
 package com.jimjh.raft
 
-import com.jimjh.raft.spec.Harness
-import org.scalatest.concurrent.Eventually
-import org.scalatest.time.SpanSugar
-import org.scalatest.{FlatSpec, Matchers}
+import com.jimjh.raft.spec.{UnitSpec, Harness}
 
 import scala.util.Random
 
@@ -11,11 +8,7 @@ import scala.util.Random
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class LogReplicationSpec
-  extends FlatSpec
-  with Matchers
-  with Eventually
-  with SpanSugar {
+class LogReplicationSpec extends UnitSpec {
 
   val rand = new Random
 

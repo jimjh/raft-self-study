@@ -1,21 +1,16 @@
 package com.jimjh.raft
 
-import org.scalatest.concurrent.Eventually
-import org.scalatest.time.SpanSugar
-import org.scalatest.{FlatSpec, Matchers}
+import com.jimjh.raft.spec.UnitSpec
 
 /** Specs for the [[ElectionTimerComponent.ElectionTimer]].
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class ElectionTimerSpec
-  extends FlatSpec
-  with Matchers
-  with Eventually
-  with SpanSugar {
+class ElectionTimerSpec extends UnitSpec {
 
   class Delegate extends ElectionTimerDelegate {
-    @volatile var triggered = 0
+    @volatile
+    var triggered = 0
 
     def timeout() {
       triggered += 1
@@ -55,7 +50,8 @@ class ElectionTimerSpec
   it should "allow restart even after an exception" in new ElectionTimerComponent {
 
     object delegate extends ElectionTimerDelegate {
-      @volatile var triggered = 0
+      @volatile
+      var triggered = 0
 
       def timeout() {
         triggered += 1

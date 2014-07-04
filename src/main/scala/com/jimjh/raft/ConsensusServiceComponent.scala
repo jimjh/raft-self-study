@@ -274,21 +274,12 @@ trait ConsensusServiceComponent {
       _timer.restart()
 
       // walk backwards until log index is found
-      var last = lastLogEntry
-      while (null != last && last.index > prevLogIndex) last = last.prev
-
-      // compare term
-      val hasMatchingEntry =
-        null != last &&
-          prevLogIndex == last.index &&
-          prevLogTerm == last.term
-
-      hasMatchingEntry match {
-        case true => // accept and update
+      _log.findLast(prevLogIndex, prevLogTerm) match {
+        case Some(logEntry) => // accept and update
           _logger.info(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
-          entries.foreach(entry => _log.append(term, entry.cmd, entry.args, None, last))
+          entries.foreach(entry => _log.append(term, entry.cmd, entry.args, None, logEntry))
           true
-        case false => // reject
+        case None => // reject
           false
       }
     }

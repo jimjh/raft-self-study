@@ -14,14 +14,14 @@ import scala.language.postfixOps
   * @param term term during which this entry was created
   * @param index log index
   * @param result optional promise that will be fulfilled after `cmd` is applied
-  * @param prev previous log entry
+  * @param _prev previous log entry
   */
 class LogEntry(val term: Long,
                val index: Long,
                val cmd: String,
                val args: Seq[String] = Array.empty[String],
                val result: Option[Promise[ReturnType]] = None,
-               val prev: LogEntry = null)
+               private[this] var _prev: LogEntry = LogEntry.sentinel)
   extends Ordered[LogEntry] {
 
   @volatile
@@ -39,7 +39,7 @@ class LogEntry(val term: Long,
          args: Seq[String] = Array.empty[String],
          promise: Option[Promise[ReturnType]] = None) = {
     if (_nextP.isCompleted) truncate()
-    val node = new LogEntry(term, index, cmd, args, promise, this)
+    val node = LogEntry(term, index, cmd, args, promise, this)
     _nextP.success(node)
     node
   }
@@ -65,11 +65,31 @@ class LogEntry(val term: Long,
     result
   }
 
+  def prev = _prev
+
   private[this] def truncate() {
     var ptr = this
     while (!ptr.isLast) ptr = Await.result(ptr.nextF, 0 nanos)
     ptr.nextP.failure(new TruncatedLogException)
     _nextP = promise[LogEntry]()
     _nextF = _nextP.future
+  }
+
+  private[LogEntry] def prev_=(e: LogEntry) =_prev = e
+}
+
+object LogEntry {
+  def apply(term: Long,
+            index: Long,
+            cmd: String,
+            args: Seq[String] = Array.empty[String],
+            result: Option[Promise[ReturnType]] = None,
+            prev: LogEntry = sentinel) =
+    new LogEntry(term, index, cmd, args, result, prev)
+
+  def sentinel = {
+    val s: LogEntry = new LogEntry(0, 0, "SENTINEL", Nil, None, null)
+    s.prev = s
+    s
   }
 }

@@ -37,7 +37,7 @@ class Harness {
   }
 
   def build(num: Int) = {
-    notNull(app, "`app` is required.")
+    notNull(app, "app")
     val last = first + num - 1
     (first to last) map (node(_, peers(last)))
   }
@@ -49,7 +49,7 @@ class Harness {
 
     val raft = new RaftServer(app(), props)
     _logger.debug(s"launching consensus service @ $port...")
-    raft.consensusService.start()
+    raft.start()
     raft
   }
 

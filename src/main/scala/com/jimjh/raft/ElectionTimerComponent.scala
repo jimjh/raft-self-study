@@ -12,7 +12,7 @@ import scala.util.Random
   *
   * @author Jim Lim - jim@jimjh.com
   */
-trait ElectionTimerDelegate {
+trait Timeoutable {
   /** Invoked by the ElectionTimer at timeout. */
   def timeout(): Unit
 }
@@ -25,7 +25,7 @@ trait ElectionTimerComponent {
   /** Resettable timer that controls election timeouts. Thread-safe.
     *
     * Each timeout is randomly chosen from an interval. Provide a delegate object to receive
-    * [[ElectionTimerDelegate.timeout]] calls when the timeout is triggered.
+    * [[Timeoutable.timeout]] calls when the timeout is triggered.
     *
     * {{{
     *   TIMEOUT_MIN_MS <= timeout <= TIMEOUT_MIN_MS + TIMEOUT_RANGE_MS
@@ -33,7 +33,7 @@ trait ElectionTimerComponent {
     *
     * @author Jim Lim - jim@jimjh.com
     */
-  class ElectionTimer(_delegate: ElectionTimerDelegate,
+  class ElectionTimer(_delegate: Timeoutable,
                       val timeoutRangeMs: Int = TimeoutRangeMs,
                       val timeoutMinMs: Int = TimeoutRangeMs) {
 

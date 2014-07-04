@@ -2,7 +2,6 @@ package com.jimjh.raft
 
 import java.util.Properties
 
-import com.twitter.finagle.Thrift
 import com.twitter.util.Await
 import com.typesafe.scalalogging.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -25,15 +24,15 @@ object TestMain {
     logger.info("WAKE")
 
     servers.filter {
-      case (raft, _) => raft.consensusService.isLeader
+      case (raft, _) => raft.isLeader
     }.map {
       case (raft, _) =>
         logger.info("Applying x on leader")
-        raft.consensusService.apply("x", Nil)
+        raft.consensus.apply("x", Nil)
         logger.info("Applying y on leader")
-        raft.consensusService.apply("y", Nil)
+        raft.consensus.apply("y", Nil)
         logger.info("Applying z on leader")
-        raft.consensusService.apply("z", Nil)
+        raft.consensus.apply("z", Nil)
     }
 
     servers.last match {
@@ -45,11 +44,7 @@ object TestMain {
     val props = new Properties()
     props.put("node.id", s"localhost:$port")
     props.put("peers", "localhost:8080,localhost:8081,localhost:8082")
-
     val raft = new RaftServer(DummyApplication, props)
-    val server = Thrift.serveIface(s":$port", raft.consensusService)
-    logger.info(s"launching consensus service @ $port...")
-    raft.consensusService.start()
-    (raft, server)
+    (raft, raft.start())
   }
 }

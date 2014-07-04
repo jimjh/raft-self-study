@@ -5,6 +5,8 @@ import java.util.Properties
 import com.jimjh.raft.log.LogComponent
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.twitter.finagle.Thrift
+import com.typesafe.scalalogging.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 /** Provides an implementation of the RAFT consensus algorithm.
   *
@@ -15,10 +17,10 @@ import com.twitter.finagle.Thrift
 package object raft {
 
   // TODO use more immutable objects, functional concurrency
-  // TODO maybe I need monads?
   // TODO improve dependency injection, define public API, subclassing
   // TODO annotate methods that are open for tests only
   // TODO update scaladocs
+  // TODO use autocloseable instead of start/stop
 
   type ReturnType = Option[Any]
 
@@ -28,8 +30,8 @@ package object raft {
     * @param _delegate application _i.e._ the state machine RAFT controls
     * @param _props configuration properties
     */
-  class RaftServer(private[this] val _delegate: Application,
-                   private[this] val _props: Properties)
+  class RaftServer(_delegate: Application,
+                   _props: Properties)
     extends ServerComponent
     with ConsensusServiceComponent
     with ClientServiceComponent
@@ -38,22 +40,18 @@ package object raft {
 
     override val log = new Log(_delegate)
 
-    override val consensusService: ConsensusService =
+    override val consensus: ConsensusService =
       new ConsensusService(
         _props,
-        log,
-        new ElectionTimer(consensusService),
+        new ElectionTimer(consensus),
         Thrift.newIface[FutureIface]
       )
 
+    override protected[raft] val logger = Logger(LoggerFactory getLogger s"Raft:${consensus.id}")
+
     // XXX maybe pass a read-only interface of the Log?
     override val clientService = new ClientService
-
-    def start() = {
-      consensusService.start()
-      this
-    }
   }
 
-  private[raft] def notNull(x: Any, n: String) = require(null != x, s"$n must not be null.")
+  private[raft] def notNull(x: Any, n: String) = require(null != x, s"`$n` must not be null.")
 }

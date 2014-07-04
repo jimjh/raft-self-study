@@ -57,7 +57,7 @@ class LogSpec extends UnitSpec {
 
   it should "apply (asynchronously) commands up till the commit index" in new PopulatedFixture {
     val CommitIndex = 93L
-    log.commitIndex = CommitIndex
+    log.commit = CommitIndex
 
     eventually(timeout(scaled(1000 milliseconds))) {
       log.lastApplied should be(CommitIndex)
@@ -67,12 +67,12 @@ class LogSpec extends UnitSpec {
   }
 
   it should "throw up an IAE if commitIndex > lastIndexNum" in new PopulatedFixture {
-    intercept[IllegalArgumentException](log.commitIndex = PopulateCount + 1)
+    intercept[IllegalArgumentException](log.commit = PopulateCount + 1)
   }
 
   it should "throw up an IAE if new commitIndex < existing commitIndex" in new PopulatedFixture {
-    log.commitIndex = PopulateCount
-    intercept[IllegalArgumentException](log.commitIndex = PopulateCount - 1)
+    log.commit = PopulateCount
+    intercept[IllegalArgumentException](log.commit = PopulateCount - 1)
   }
 
   it should "allow concurrent committing and appending" in new Fixture {
@@ -90,9 +90,9 @@ class LogSpec extends UnitSpec {
 
     thread("committer") {
       waitForBeat(1)
-      log.commitIndex = count // commit all
+      log.commit = count // commit all
       waitForBeat(2)
-      log.commitIndex = 2 * count // commit all
+      log.commit = 2 * count // commit all
     }
 
     whenFinished {
@@ -122,8 +122,8 @@ class LogSpec extends UnitSpec {
   }
 
   it should "update commit index" in new PopulatedFixture {
-    log.commitIndex = 10L
-    log.commitIndex should be(10L)
+    log.commit = 10L
+    log.commit should be(10L)
   }
 
   it should "advance a given log index w. a future" in new PopulatedFixture {

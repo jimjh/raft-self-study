@@ -8,7 +8,7 @@ import com.jimjh.raft.spec.UnitSpec
   */
 class ElectionTimerSpec extends UnitSpec {
 
-  class Delegate extends ElectionTimerDelegate {
+  class Delegate extends Timeoutable {
     @volatile
     var triggered = 0
 
@@ -49,7 +49,7 @@ class ElectionTimerSpec extends UnitSpec {
 
   it should "allow restart even after an exception" in new ElectionTimerComponent {
 
-    object delegate extends ElectionTimerDelegate {
+    object delegate extends Timeoutable {
       @volatile
       var triggered = 0
 

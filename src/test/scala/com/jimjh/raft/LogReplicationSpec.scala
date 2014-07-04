@@ -46,14 +46,11 @@ class LogReplicationSpec extends UnitSpec {
     val leader = waitForLeader()
 
     // send command to leader
-    leader.consensusService.apply(command, Nil)
+    leader.consensus.apply(command, Nil)
 
     // ensure that all followers should have copied that command
     eventually(timeout(scaled(pause milliseconds))) {
-      rafts.foreach {
-        raft =>
-          raft.consensusService.lastLogEntry.cmd should equal(command)
-      }
+      rafts.foreach { _.log.last.cmd should equal(command) }
     }
   }
 

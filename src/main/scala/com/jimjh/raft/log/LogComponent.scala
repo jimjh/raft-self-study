@@ -18,6 +18,8 @@ trait LogComponent {
 
   val log: Log
 
+  protected[raft] val logger: Logger = Logger(LoggerFactory getLogger "Log")
+
   implicit def toSugaredLock(lock: ReentrantLock) = new SugaredLock(lock)
 
   /** Manages an ordered list of commands that will be applied on the delegate app. Thread-safe.
@@ -46,12 +48,10 @@ trait LogComponent {
 
     notNull(_delegate, "_delegate")
 
-    private[this] val _logger = Logger(LoggerFactory getLogger "Log")
-
     /** Serializable sequence of log entries. */
     private[this] val _logs = LogEntry.sentinel
 
-    /** Write lock for [[_commitIndex]]. */
+    /** Write lock for [[_commit]]. */
     private[this] val _commitLock = new ReentrantLock()
 
     private[this] val _hasCommits = _commitLock.newCondition()
@@ -66,7 +66,7 @@ trait LogComponent {
 
     /** Index of the committed log entry. */
     @volatile
-    private[this] var _commitIndex = 0L
+    private[this] var _commit = 0L
 
     def last: LogEntry = _last
 
@@ -74,19 +74,19 @@ trait LogComponent {
 
     def lastApplied = _lastApplied.index
 
-    def commitIndex = _commitIndex
+    def commit = _commit
 
     /** Updates commit index to `index`. Thread-safe.
       *
       * @param index new commit index
-      * @throws IllegalStateException if `index` < [[_commitIndex]], or if `index` > [[lastIndex]]
       */
-    def commitIndex_=(index: Long) {
+    def commit_=(index: Long) {
       _commitLock {
-        require(index >= _commitIndex, s"Cannot decrease commitIndex from ${_commitIndex} to $index.")
-        require(index <= lastIndex, s"Cannot set commitIndex greater than the lastIndex=$lastIndex.")
-        _commitIndex = index
-        _hasCommits.signalAll()
+        if (index > commit) {
+          logger.info(s"Advancing commit from $commit to $index.")
+          _commit = index
+          _hasCommits.signalAll()
+        }
       }
     }
 
@@ -102,11 +102,21 @@ trait LogComponent {
                cmd: String,
                args: Seq[String] = Array.empty[String],
                promise: Option[Promise[ReturnType]] = None,
-               index: LogEntry = _last): LogEntry = {
-      _logs.synchronized {
-        _last = index <<(term, lastIndex + 1, cmd, args, promise)
-        _last
+               from: LogEntry = _last): LogEntry = _logs.synchronized {
+      // TODO we need a test for truncating and adding multiple log entries (check index)
+      _last = from <<(term, from.index + 1, cmd, args, promise)
+      _last
+    }
+
+    def appendEntries(term: Long,
+               entries: Seq[com.jimjh.raft.rpc.Entry],
+               from: LogEntry = _last) = _logs.synchronized {
+      var prev = from
+      for (entry <- entries) {
+        _last = prev <<(term, prev.index + 1, entry.cmd, entry.args)
+        prev = _last
       }
+      _last
     }
 
     /** @return last log entry with a match index and term */
@@ -119,7 +129,7 @@ trait LogComponent {
       }
     }
 
-    /** Launches a new background task that attempts to apply all log entries up till [[_commitIndex]].
+    /** Launches a new background task that attempts to apply all log entries up till [[_commit]].
       *
       * @return this
       */
@@ -128,30 +138,28 @@ trait LogComponent {
         // [IMPORTANT] this should be the only thread that has write access to _lastApplied
         override def run() = {
           Thread.currentThread().setName("LogApplicator")
-          _logger.debug("LogApplicator started.")
+          logger.debug("LogApplicator started.")
           keepApplying()
         }
       }).start()
       this
     }
 
-    /** Keeps applying logs until [[_commitIndex]], then waits. */
+    /** Keeps applying logs until [[_commit]], then waits. */
     private[this] def keepApplying() =
       while (!Thread.currentThread().isInterrupted) {
 
         var targetIndex = lastApplied
         _commitLock {
           // take lock, read value, make decision
-          if (lastApplied < _commitIndex) {
-            targetIndex = _commitIndex
+          if (lastApplied < _commit) {
+            targetIndex = _commit
           } else _hasCommits.await()
         }
 
         // release lock while applying committed log entries
         while (lastApplied < targetIndex) {
-          if (_lastApplied.isLast) // make sure .next is valid
-            throw new IndexOutOfBoundsException(s"commitIndex=$targetIndex exceeded the end of the _logs sequence.")
-          val next = Await.result(_lastApplied.nextF, 0 nanos)
+          val next = Await.result(_lastApplied.nextF, Duration.Inf)
           next(_delegate) // forward log entry's command to delegate
           _lastApplied = next
         }

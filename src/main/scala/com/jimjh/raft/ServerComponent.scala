@@ -24,8 +24,6 @@ trait ServerComponent {
     with LogComponent
     with ElectionTimerComponent =>
 
-  def isLeader: Boolean = consensus.isLeader
-
   def start() = {
     log.start()
     consensus.start()

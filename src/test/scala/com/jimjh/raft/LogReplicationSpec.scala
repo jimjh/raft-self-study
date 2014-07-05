@@ -24,7 +24,6 @@ class LogReplicationSpec extends UnitSpec {
 
     def waitForLeader(): RaftServer = {
       eventually(timeout(scaled(pause milliseconds))) {
-        // rafts.find(_.isLeader) should be ('defined)
         rafts.find(_.isLeader) match {
           case Some(leader) => leader
           case None => fail("No leader found.")
@@ -33,29 +32,51 @@ class LogReplicationSpec extends UnitSpec {
     }
   }
 
-  def app() = {
-    new Application() {
-      override def apply(cmd: String, args: Seq[String]): ReturnType = {
-        None
-      }
+  def app() = new Application() {
+    override def apply(cmd: String, args: Seq[String]): ReturnType = {
+      None
     }
   }
 
   it should "copy commands to all followers" in new Fixture {
-
+    // given leader
     val leader = waitForLeader()
 
-    // send command to leader
+    // when a command is given
     leader.consensus.apply(command, Nil)
 
-    // ensure that all followers should have copied that command
+    // then all followers should receive it
     eventually(timeout(scaled(pause milliseconds))) {
       rafts.foreach { _.log.last.cmd should equal(command) }
     }
   }
 
+  it should "increment the leader's commit index, eventually" in new Fixture {
+    // given leader
+    val leader = waitForLeader()
+
+    // when a command is given
+    (1 until 100).foreach(i => leader.consensus.apply(s"command $i", Nil))
+
+    // then all followers should receive it
+    eventually(timeout(scaled(pause milliseconds))) {
+      leader.commit should be (99)
+    }
+  }
+
+  it should "increment all follower's commit indexes, eventually" in new Fixture {
+    // given leader
+    val leader = waitForLeader()
+
+    // when a command is given
+    (1 until 100).foreach(i => leader.consensus.apply(s"command $i", Nil))
+
+    // then all followers should receive it
+    eventually(timeout(scaled(pause milliseconds))) {
+      rafts.foreach { _.commit should equal(99) }
+    }
+  }
+
   // TODO followers should truncate their own logs
-  // TODO the leader should increment its commit index after replicating the entry to a majority of servers
   // TODO the leader should not increment its commit index before replicating the entry to a majority of servers
-  // TODO followers should update their commit index from the leader
 }

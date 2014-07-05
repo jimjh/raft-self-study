@@ -27,6 +27,11 @@ trait ConsensusServiceComponent {
 
   protected[raft] val logger: Logger
 
+  def isLeader: Boolean = consensus.isLeader
+
+  /** @return commit index */
+  def commit: Long = log.commit
+
   /** Responds to RPCs from other servers using the RAFT algorithm.
     *
     * Each server is implemented as a state machine that governs the transitions between

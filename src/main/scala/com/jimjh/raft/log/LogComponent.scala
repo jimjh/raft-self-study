@@ -68,6 +68,15 @@ trait LogComponent {
     @volatile
     private[this] var _commit = 0L
 
+    private[this] val _applicator = new Thread(new Runnable {
+      // [IMPORTANT] this should be the only thread that has write access to _lastApplied
+      override def run() = {
+        Thread.currentThread().setName("LogApplicator")
+        logger.debug("LogApplicator started.")
+        keepApplying()
+      }
+    })
+
     def last: LogEntry = _last
 
     def lastIndex: Long = last.index
@@ -103,7 +112,6 @@ trait LogComponent {
                args: Seq[String] = Array.empty[String],
                promise: Option[Promise[ReturnType]] = None,
                from: LogEntry = _last): LogEntry = _logs.synchronized {
-      // TODO we need a test for truncating and adding multiple log entries (check index)
       _last = from <<(term, from.index + 1, cmd, args, promise)
       _last
     }
@@ -134,15 +142,12 @@ trait LogComponent {
       * @return this
       */
     def start() = {
-      new Thread(new Runnable {
-        // [IMPORTANT] this should be the only thread that has write access to _lastApplied
-        override def run() = {
-          Thread.currentThread().setName("LogApplicator")
-          logger.debug("LogApplicator started.")
-          keepApplying()
-        }
-      }).start()
+      _applicator.start()
       this
+    }
+
+    def stop() = {
+      _applicator.interrupt()
     }
 
     /** Keeps applying logs until [[_commit]], then waits. */
@@ -171,6 +176,11 @@ trait LogComponent {
     def apply[T](block: => T): T = {
       lock.lock()
       try block
+      catch {
+        case e: InterruptedException =>
+          logger.warn("Releasing lock due to thread interruption", e)
+          throw e
+      }
       finally lock.unlock()
     }
   }

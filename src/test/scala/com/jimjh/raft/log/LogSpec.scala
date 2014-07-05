@@ -1,165 +1,237 @@
 package com.jimjh.raft.log
 
 import com.jimjh.raft._
-import com.jimjh.raft.spec.UnitSpec
-
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, promise}
+import com.jimjh.raft.rpc.Entry
+import com.jimjh.raft.spec.FluentSpec
 
 /** Specs for [[LogComponent.Log]]
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class LogSpec extends UnitSpec {
+class LogSpec
+  extends FluentSpec
+  with LogComponent {
 
+  // dummy application that just prepends commands to a sequence
+  class Delegate extends Application {
+    var history = List[String]()
+    override def apply(cmd: String, args: Seq[String]): Option[Any] = {
+      history = cmd +: history
+      None
+    }
+  }
 
-  trait Fixture extends LogComponent {
+  def delegate = new Delegate
 
-    val AnyTerm = 5
-    val AnyCommand = "any.command"
+  val AnyTerm = 5
+  val AnyCommand = "any.command"
+  val AnyArgs = "arg1"::Nil
 
-    // dummy application that just prepends commands
-    object delegate extends Application {
-      var history = List[String]()
+  override val log = null
 
-      override def apply(cmd: String, args: Seq[String]): Option[Any] = {
-        history = cmd +: history
-        None
+  "An empty log" when {
+
+    "appending a new log entry" should {
+      val log = new Log(delegate).start()
+      log.append(AnyTerm, AnyCommand, AnyArgs)
+
+      "increment the log index" in {
+        log.lastIndex should be(1)
+      }
+
+      "create the proper log entry" in {
+        log.last.cmd should be(AnyCommand)
+        log.last.args should be(AnyArgs)
+      }
+
+      "not apply the command (since it has not been committed)" in {
+        log.lastApplied should be(0)
       }
     }
 
-    // test subject
-    val log = new Log(delegate).start()
+    "appending 99 new log entries" should {
+      val log = new Log(delegate).start()
+      (1 until 100).foreach(log.append(_, AnyCommand, AnyArgs))
+
+      "increment the log index" in {
+        log.lastIndex should be(99)
+      }
+
+      "create the proper log entry" in {
+        log.last.cmd should be(AnyCommand)
+        log.last.args should be(AnyArgs)
+      }
+
+      "not apply the commands (since they have not been committed)" in {
+        log.lastApplied should be(0)
+      }
+    }
   }
 
-  it should "append a new LogEntry" in new Fixture {
-    log.append(AnyTerm, AnyCommand, Array("arg1"))
-
-    log.lastIndex should be(1)
-    log.last.cmd should be(AnyCommand)
-    log.last.args should be(Array("arg1"))
-    log.lastApplied should be(0)
-  }
-
-  it should "append 100 new log entries" in new Fixture {
-    (1 until 100).foreach(log.append(_, AnyCommand))
-
-    log.lastIndex should be(99)
-    log.last.cmd should be(AnyCommand)
-    log.lastApplied should be(0)
-  }
-
-  trait PopulatedFixture extends Fixture {
+  "A populated log" when {
     val PopulateCount = 100
     val Term = 1
-    (1 until 100 + 1).foreach(i => log.append(Term, s"command#$i"))
-  }
 
-  it should "apply (asynchronously) commands up till the commit index" in new PopulatedFixture {
-    val CommitIndex = 93L
-    log.commit = CommitIndex
+    val del = new Delegate
 
-    eventually(timeout(scaled(1000 milliseconds))) {
-      log.lastApplied should be(CommitIndex)
-      delegate.history.length should be(CommitIndex)
-      delegate.history.head should be(s"command#$CommitIndex")
-    }
-  }
-
-  it should "throw up an IAE if commitIndex > lastIndexNum" in new PopulatedFixture {
-    intercept[IllegalArgumentException](log.commit = PopulateCount + 1)
-  }
-
-  it should "throw up an IAE if new commitIndex < existing commitIndex" in new PopulatedFixture {
-    log.commit = PopulateCount
-    intercept[IllegalArgumentException](log.commit = PopulateCount - 1)
-  }
-
-  it should "allow concurrent committing and appending" in new Fixture {
-    val term = 10
-    val count = 100
-    val conductor = new Conductor
-
-    import conductor._
-
-    thread("appender") {
-      (0 until count) foreach { i => log.append(term, s"command#$i")}
-      waitForBeat(1) // wait for committer to start
-      (count until 2 * count) foreach { i => log.append(term, s"command#$i")}
+    def populatedLog = {
+      val log = new Log(del).start()
+      (1 until PopulateCount + 1).foreach(i => log.append(Term, s"command#$i"))
+      log
     }
 
-    thread("committer") {
-      waitForBeat(1)
-      log.commit = count // commit all
-      waitForBeat(2)
-      log.commit = 2 * count // commit all
+    "committed" should {
+      // here, "committed" means raising the commit index
+      val CommitIndex = 93L
+      val log = populatedLog
+      log.commit = CommitIndex
+
+      "apply (asynchronously) commands up till the commit index" in {
+        eventually(timeout(scaled(1000 milliseconds))) {
+          log.lastApplied should be(CommitIndex)
+          del.history.length should be(CommitIndex)
+          del.history.head should be(s"command#$CommitIndex")
+        }
+      }
+
+      "update the commit index" in {
+        log.commit should be(CommitIndex)
+      }
+
+      "should not decrease the commit index" in {
+        log.commit = 9L
+        log.commit should be(CommitIndex)
+      }
     }
 
-    whenFinished {
+    "stopped" should {
+      val log = populatedLog
+      "stop without errors" in {
+        log.stop()
+      }
+    }
+
+    "using #findLast" should {
+      val log = populatedLog
+
+      "find rightmost entry with matching index and term" in {
+        val opt = log.findLast(54, Term)
+        opt should be('defined)
+        opt.get.index should be(54)
+        opt.get.term should be(Term)
+      }
+
+      "not find false positives" in {
+        log.findLast(54, 2) shouldNot be('defined)
+      }
+    }
+
+    "using #appendEntries" should {
+      // given a populated log
+      val log = populatedLog
+      val tail = log.last
+      val from = log.last.prev.prev.prev
+
+      // when appended/truncated
+      val entries = List(Entry("x"), Entry("y"), Entry("z"))
+      val last = log.appendEntries(0, entries, from)
+
+      "append all of the given entries" in {
+        last should be('last)
+        last.cmd should be("z")
+      }
+
+      "truncate from given starting entry" in {
+        last.index should be(tail.index)
+      }
+
+      "organize entries with proper indexes" in {
+        var ptr = last
+        var index = ptr.index
+        while (ptr != ptr.prev) {
+          ptr.index should be(index)
+          ptr = ptr.prev
+          index = index - 1
+        }
+      }
+    }
+
+    "append and advance a given log index w. a future" in {
+      import scala.concurrent.ExecutionContext.Implicits.global
+
+      val log = populatedLog
+      val last = log.last
+      var fulfilled = false
+      last.nextF.map { _ => fulfilled = true}
+
+      fulfilled should be(right = false)
+      log.append(0, "any.cmd")
       eventually {
-        log.lastApplied should be(2 * count)
-        delegate.history.length should be(2 * count)
+        fulfilled should be(right = true)
+      }
+    }
+
+    "appended and truncated" should {
+      val log = populatedLog
+      val last = log.last
+      val prev = last.prev.prev.prev
+      val entry = log.append(0, "any.cmd", Nil, None, prev)
+
+      "pass along a TruncatedLogException" in {
+        import scala.concurrent.ExecutionContext.Implicits.global
+
+        @volatile
+        var fulfilled = 0
+        last.nextF
+          .map { case e => fulfilled = 1}
+          .onFailure { case e: TruncatedLogException => fulfilled = 2}
+
+        eventually {
+          fulfilled should be(2)
+        }
+      }
+
+      "actually truncate" in {
+        entry.index should be(last.index - 2)
+        entry should be('last)
       }
     }
   }
 
-  it should "fulfill promises, if any" in new Fixture {
+  "An isolated log" when {
 
-    val conductor = new Conductor
+    val del = new Delegate
+    val log = new Log(del).start()
 
-    import conductor._
+    "created" should {
 
-    val p = promise[ReturnType]()
-    val entry = log.append(AnyTerm, AnyCommand, Array("arg1"), Some(p))
+      "allow concurrent appending and committing" in {
+        val term = 10
+        val count = 100
+        val conductor = new Conductor
 
-    thread("reader") {
-      Await.result(p.future, Duration.Inf) should be(None)
-    }
+        import conductor._
 
-    thread("writer") {
-      entry(delegate)
-    }
-  }
+        thread("appender") {
+          (0 until count) foreach { i => log.append(term, s"command#$i")}
+          waitForBeat(1) // wait for committer to start
+          (count until 2 * count) foreach { i => log.append(term, s"command#$i")}
+        }
 
-  it should "update commit index" in new PopulatedFixture {
-    log.commit = 10L
-    log.commit should be(10L)
-  }
+        thread("committer") {
+          waitForBeat(1)
+          log.commit = count // commit all
+          waitForBeat(2)
+          log.commit = 2 * count // commit all
+        }
 
-  it should "advance a given log index w. a future" in new PopulatedFixture {
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-
-    val last = log.last
-    var fulfilled = false
-    last.nextF.map { _ => fulfilled = true}
-
-    fulfilled should be(false)
-    log.append(0, "any.cmd")
-    eventually {
-      fulfilled should be(true)
-    }
-  }
-
-  it should "truncate w. exceptions" in new PopulatedFixture {
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-
-    // attach a hook to the last entry's next ptr
-    val last = log.last
-
-    @volatile
-    var fulfilled = 0
-
-    last.nextF
-      .map { _ => fulfilled = 1}
-      .onFailure { case _ => fulfilled = 2}
-
-    // truncate
-    val prev = last.prev
-    log.append(0, "any.cmd", Array.empty[String], None, prev)
-    eventually {
-      fulfilled should be(2)
+        whenFinished {
+          eventually {
+            log.lastApplied should be(2 * count)
+            del.history.length should be(2 * count)
+          }
+        }
+      }
     }
   }
 }

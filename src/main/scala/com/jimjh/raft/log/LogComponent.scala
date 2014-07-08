@@ -72,7 +72,7 @@ trait LogComponent {
       // [IMPORTANT] this should be the only thread that has write access to _lastApplied
       override def run() = {
         Thread.currentThread().setName("LogApplicator")
-        logger.debug("LogApplicator started.")
+        logger.trace("LogApplicator started.")
         keepApplying()
       }
     })
@@ -137,7 +137,7 @@ trait LogComponent {
       }
     }
 
-    /** Launches a new background task that attempts to apply all log entries up till [[_commit]].
+    /** Launches a new background task that attempts to apply all log entries up till [[commit]].
       *
       * @return this
       */
@@ -150,7 +150,7 @@ trait LogComponent {
       _applicator.interrupt()
     }
 
-    /** Keeps applying logs until [[_commit]], then waits. */
+    /** Keeps applying logs until [[commit]], then waits. */
     private[this] def keepApplying() =
       while (!Thread.currentThread().isInterrupted) {
 

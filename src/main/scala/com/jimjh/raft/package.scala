@@ -12,19 +12,30 @@ import org.slf4j.LoggerFactory
   *
   * == Overview ==
   *
+  * == Example Usage ==
+  *
+  * {{{
+  *   val props = new Properties()
+  *   props.put("node.id", s"localhost:$port")
+  *   props.put("peers", "localhost:8080,localhost:8081,localhost:8082")
+  *   val raft = new RaftServer(application, props)
+  *   Await.ready(raft.start())
+  * }}}
+  *
   * @author Jim Lim - jim@jimjh.com
   */
 package object raft {
 
   // TODO use more immutable objects, functional concurrency
   // TODO improve dependency injection, define public API, subclassing
-  // TODO annotate methods that are open for tests only
   // TODO update scaladocs
   // TODO use autocloseable instead of start/stop
 
   type ReturnType = Option[Any]
 
-  /** Configuration "module" for dependency injection. Not sure if this is a good place for it, but
+  /** Configuration "module" for dependency injection.
+    *
+    * This is where we assemble the cake using dependency injection. Not sure if this is a good place for it, but
     * this sure is convenient.
     *
     * @param _delegate application _i.e._ the state machine RAFT controls
@@ -43,9 +54,10 @@ package object raft {
     override val consensus: ConsensusService =
       new ConsensusService(
         _props,
-        new ElectionTimer(consensus),
         Thrift.newIface[FutureIface]
       )
+
+    override protected val timer = new ElectionTimer(consensus)
 
     override protected[raft] val logger = Logger(LoggerFactory getLogger s"Raft:${consensus.id}")
 

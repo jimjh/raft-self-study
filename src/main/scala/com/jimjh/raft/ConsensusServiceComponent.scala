@@ -21,12 +21,19 @@ import scala.concurrent.promise
   */
 trait ConsensusServiceComponent {
 
-  val consensus: ConsensusService
+  /** Manages RPCs implementing the RAFT consensus algorithm */
+  val consensus: ConsensusService // #injectable
 
-  val log: LogComponent#Log // # injected
+  /** Serializable array of log entries. */
+  val log: LogComponent#Log // #injected
 
-  protected[raft] val logger: Logger
+  /** Restartable, stoppable election timer. */
+  protected val timer: ElectionTimerComponent#ElectionTimer // #injected
 
+  /** slf4j logger. */
+  protected[raft] val logger: Logger // #injected
+
+  /** @return true iff this server is currently a leader */
   def isLeader: Boolean = consensus.isLeader
 
   /** @return commit index */
@@ -41,14 +48,12 @@ trait ConsensusServiceComponent {
     * @note The timer parameter is a bit funky. The constructor needs an [[ElectionTimerComponent.ElectionTimer]]
     *       instance, whose constructor needs an [[Timeoutable]] instance that is, usually, `this`. To work'
     *       around this problem, I let `timer` be a call-by-name parameter, which will be called exactly once to
-    *       instantiate a private lazy val `_timer`. Refer to [[RaftServer]] for an example.
+    *       instantiate a private lazy val `timer`. Refer to [[RaftServer]] for an example.
     *
     * @param _props configuration options for the consensus service
-    * @param timer provider function that returns an [[ElectionTimerComponent.ElectionTimer]] instance
     * @param _newClient factory function that returns a new Thrift RPC client
     */
   class ConsensusService(_props: Properties,
-                         timer: => ElectionTimerComponent#ElectionTimer, // #funky
                          _newClient: String => FutureIface)
     extends RaftConsensusService[Future]
     with Timeoutable
@@ -59,8 +64,6 @@ trait ConsensusServiceComponent {
 
     /** Node ID */
     val id = _props getProperty "node.id"
-
-    private[this] lazy val _timer = timer // #funky
 
     /** Map of node IDs to thrift clients. */
     private[this] val _peers = extractPeers(_props getProperty "peers")
@@ -81,7 +84,10 @@ trait ConsensusServiceComponent {
       logger.debug(s"Received RequestVote($term, $candidateId, $lastLogIndex, $lastLogTerm)")
       new Promise(Try {
         val vote = _node.requestVote(term, candidateId, lastLogIndex, lastLogTerm)
-        if (vote.granted) _timer.restart() // avoid starting an election if one is in progress (optional)
+        if (vote.granted) {
+          timer.restart() // avoid starting an election if one is in progress (optional)
+          persist()
+        }
         vote
       })
     }
@@ -96,9 +102,8 @@ trait ConsensusServiceComponent {
                                prevLogTerm: Long,
                                entries: Seq[Entry],
                                leaderCommit: Long): Future[Boolean] = {
-      // FIXME why am I not using leaderId
       logger.trace(s"Received AppendEntries($term, $leaderId, $prevLogIndex, $prevLogTerm)")
-      if (term >= _node.term) _timer.restart()
+      if (term >= _node.term) timer.restart()
       new Promise(Try {
         _node.appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
       })
@@ -110,7 +115,7 @@ trait ConsensusServiceComponent {
     def start() = {
       val server = Thrift.serveIface(id, this)
       logger.info(s"Starting consensus service - ${_props}")
-      _timer.restart()
+      timer.restart()
       server
     }
 
@@ -122,23 +127,32 @@ trait ConsensusServiceComponent {
 
     def isLeader: Boolean = _node.state == Leader
 
-    /** Triggered by [[ElectionTimerComponent.ElectionTimer]]. */
+    /* Triggered by [[ElectionTimerComponent.ElectionTimer]]. */
     override def timeout() = _node.timeout
 
+    /* Triggered by [[com.jimjh.raft.node.Node]]. */
     override def become(to: State.State, term: Long)
                        (implicit node: Node) = synchronized {
       if (_node eq node) {
+        // ignore stale requests
         logger.info(s"(state: ${_node.state}, term: ${_node.term}) ~> (state: $to, term: $term)")
         to match {
           case Follower | Candidate =>
-            _timer.restart()
+            timer.restart()
             _node = _node.transition(to, term).start(_peers)
           case Leader =>
-            _timer.cancel()
+            timer.cancel()
             _node = _node.transition(to, term).start(_peers)
         }
+        persist()
       }
       _node
+    }
+
+    private[this] def persist() {
+      // TODO somehow synchronize and dump this into a file
+      // TODO restart from file
+      logger.info(s"PERSIST term: ${_node.term}, votedFor: ${_node.votedFor}")
     }
 
     /** Converts comma-separated host ports into a map.
@@ -152,4 +166,5 @@ trait ConsensusServiceComponent {
       }.toMap - id
     }
   }
+
 }

@@ -19,8 +19,10 @@ trait Timeoutable {
 
 trait ElectionTimerComponent {
 
-  val TimeoutRangeMs = 2500
-  val TimeoutMinMs = 350
+  object ElectionTimer {
+    val TimeoutRangeMs = 2500
+    val TimeoutMinMs = 350
+  }
 
   /** Resettable timer that controls election timeouts. Thread-safe.
     *
@@ -34,8 +36,8 @@ trait ElectionTimerComponent {
     * @author Jim Lim - jim@jimjh.com
     */
   class ElectionTimer(_delegate: Timeoutable,
-                      val timeoutRangeMs: Int = TimeoutRangeMs,
-                      val timeoutMinMs: Int = TimeoutRangeMs) {
+                      val timeoutRangeMs: Int = ElectionTimer.TimeoutRangeMs,
+                      val timeoutMinMs: Int = ElectionTimer.TimeoutRangeMs) {
 
     notNull(_delegate, "_delegate")
 

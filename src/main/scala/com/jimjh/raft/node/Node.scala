@@ -7,6 +7,16 @@ import com.typesafe.scalalogging.slf4j.Logger
 
 trait Machine {
   implicit protected val machine = this
+
+  /** Moves from the current node to a node of the given state.
+    *
+    * The implementation is expected to invoke `node#transition` at some point.
+    *
+    * @param state target state
+    * @param term election term of the new node
+    * @param node current node
+    * @return new node
+    */
   def become(state: State, term: Long)(implicit node: Node): Node
 }
 
@@ -21,6 +31,7 @@ trait Node {
   implicit val node = this
   protected val _logger: Logger
 
+  /** @return ID of the candidate that this node voted for, if any */
   def votedFor: Option[String]
 
   def start(peers: Map[String, FutureIface])
@@ -38,6 +49,7 @@ trait Node {
                   lastLogTerm: Long)
                  (implicit machine: Machine): Vote
 
+  // FIXME why am I not using leaderId
   def appendEntries(reqTerm: Long,
                     leaderId: String,
                     prevLogIndex: Long,

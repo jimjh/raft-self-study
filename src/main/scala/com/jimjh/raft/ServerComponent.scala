@@ -24,6 +24,10 @@ trait ServerComponent {
     with LogComponent
     with ElectionTimerComponent =>
 
+  /** Starts various components.
+    *
+    * Including the log, the consensus service, and the client service.
+    */
   def start() = {
     log.start()
     consensus.start()

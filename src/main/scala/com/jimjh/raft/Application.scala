@@ -4,8 +4,7 @@ package com.jimjh.raft
   *
   * Applications implement this interface to receive committed commands from the log.
   *
-  * On success, the `lastApplied` counter is incremented. On exception, the server
-  * will be terminated.
+  * On success, the `lastApplied` counter is incremented. On exception, the behavior is undefined.
   *
   * As documented in the RAFT paper, it's up to the application to prevent duplicate
   * executions of the same command _e.g._ assign unique serial numbers to each
@@ -17,9 +16,10 @@ trait Application {
 
   /** Applies `cmd` with `args` to the application.
     *
+    * @todo TODO exceptions should be forwarded to the client
     * @param cmd   command
     * @param args  array of command arguments
     * @throws RuntimeException on error
     */
-  def apply(cmd: String, args: Array[String])
+  def apply(cmd: String, args: Seq[String]): ReturnType
 }

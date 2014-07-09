@@ -1,14 +1,12 @@
 package com.jimjh.raft
 
-import org.scalatest.{FlatSpec, Matchers}
+import com.jimjh.raft.spec.UnitSpec
 
 /** Specs for the [[ConsensusServiceComponent]].
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class ConsensusServiceSpec
-  extends FlatSpec
-  with Matchers {
+class ElectionSpec extends UnitSpec {
   // FOLLOWER
   it should "timeout and start an election"
   it should "not timeout if it receives heartbeats"

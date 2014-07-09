@@ -12,20 +12,22 @@ import scala.util.Random
   *
   * @author Jim Lim - jim@jimjh.com
   */
-trait ElectionTimerDelegate {
+trait Timeoutable {
   /** Invoked by the ElectionTimer at timeout. */
-  protected[raft] def timeout(): Unit
+  def timeout(): Unit
 }
 
 trait ElectionTimerComponent {
 
-  val TimeoutRangeMs = 2500
-  val TimeoutMinMs = 350
+  object ElectionTimer {
+    val TimeoutRangeMs = 2500
+    val TimeoutMinMs = 350
+  }
 
   /** Resettable timer that controls election timeouts. Thread-safe.
     *
     * Each timeout is randomly chosen from an interval. Provide a delegate object to receive
-    * [[ElectionTimerDelegate.timeout]] calls when the timeout is triggered.
+    * [[Timeoutable.timeout]] calls when the timeout is triggered.
     *
     * {{{
     *   TIMEOUT_MIN_MS <= timeout <= TIMEOUT_MIN_MS + TIMEOUT_RANGE_MS
@@ -33,21 +35,18 @@ trait ElectionTimerComponent {
     *
     * @author Jim Lim - jim@jimjh.com
     */
-  class ElectionTimer(private[this] val _delegate: ElectionTimerDelegate,
-                      val timeoutRangeMs: Int = TimeoutRangeMs,
-                      val timeoutMinMs: Int = TimeoutRangeMs) {
+  class ElectionTimer(_delegate: Timeoutable,
+                      val timeoutRangeMs: Int = ElectionTimer.TimeoutRangeMs,
+                      val timeoutMinMs: Int = ElectionTimer.TimeoutRangeMs) {
+
+    notNull(_delegate, "_delegate")
 
     private[this] val _random = new Random()
     private[this] val _scheduler = Executors.newScheduledThreadPool(1)
     private[this] var _future = Option.empty[ScheduledFuture[_]]
     private[this] val _logger = Logger(LoggerFactory getLogger "ElectionTimer")
     private[this] val _task = new Runnable {
-      override def run() {
-        _delegate match {
-          case null => _logger.warn("_delegate is null.")
-          case some => some.timeout()
-        }
-      }
+      override def run() = _delegate.timeout()
     }
 
     // allow me a little bit of debugging convenience

@@ -110,6 +110,7 @@ To run the tests, use
 - Phase 1: Skeleton classes, RPCs
 - Phase 2: Timeouts, Leadership Election
 - Phase 3: Log Replication and Application
+- Phase 3.5: Persistent State
 - Phase 4: Membership Changes
 - Phase 5: Log Compaction (Snapshotting)
 

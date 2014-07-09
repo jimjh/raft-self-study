@@ -1,26 +1,23 @@
 package com.jimjh.raft
 
-import org.scalatest.{Matchers, FlatSpec}
-import org.scalatest.concurrent.Eventually
-import org.scalatest.time.SpanSugar
+import com.jimjh.raft.spec.UnitSpec
+
 import scala.language.reflectiveCalls
 
 /** Specs for the [[HeartBeat]].
   *
   * @author Jim Lim - jim@jimjh.com
   */
-class HeartBeatSpec
-  extends FlatSpec
-  with Matchers
-  with Eventually
-  with SpanSugar {
+class HeartBeatSpec extends UnitSpec {
 
   val AnyTerm = 31
 
   trait Fixture {
     val delegate = new HeartBeatDelegate {
-      @volatile var triggered = 0
-      override protected[raft] def pulse(term: Long) {
+      @volatile
+      var triggered = 0
+
+      override def pulse(term: Long) {
         triggered += 1
       }
     }
@@ -44,8 +41,10 @@ class HeartBeatSpec
 
   it should "trigger regularly even if the delegate is slow" in {
     val delegate = new HeartBeatDelegate {
-      @volatile var triggered = 0
-      override protected[raft] def pulse(term: Long) {
+      @volatile
+      var triggered = 0
+
+      override def pulse(term: Long) {
         triggered += 1
         Thread.sleep(20000)
       }
@@ -54,6 +53,12 @@ class HeartBeatSpec
     val pause = 30 * heartbeat.period
     eventually(timeout(scaled(pause milliseconds))) {
       delegate.triggered should be >= 10
+    }
+  }
+
+  it should "throw an IAE if _delegate were null" in {
+    intercept[IllegalArgumentException] {
+      new HeartBeat(null, 0)
     }
   }
 }

@@ -7,10 +7,10 @@ import scala.concurrent.{ExecutionContext, future}
 
 trait HeartBeatDelegate {
   /** Invoked by the HeartBeat at timeout. */
-  protected[raft] def pulse(term: Long): Unit
+  def pulse(term: Long): Unit
 }
 
-object HeartBeatDefaults {
+object HeartBeat {
   val Period = 150
 }
 
@@ -20,20 +20,21 @@ object HeartBeatDefaults {
   * thread from a cached thread pool. Every pulse must terminate within 2 heartbeats in order to guarantee regular
   * heartbeats. If pulses block, new threads need to be created, which may cause performance to degrade over time.
   *
+  * @param _delegate leader, or other object to react to heartbeats
+  * @param _term term number
+  * @param period number of milliseconds between heartbeats
   * @author Jim Lim - jim@jimjh.com
   */
-class HeartBeat(private[this] val _delegate: HeartBeatDelegate,
-                private[this] val _term: Long,
-                val period: Int = HeartBeatDefaults.Period) {
+class HeartBeat(_delegate: HeartBeatDelegate,
+                _term: Long,
+                val period: Int = HeartBeat.Period) {
+
+  notNull(_delegate, "_delegate")
 
   private[this] val _scheduler = Executors.newScheduledThreadPool(1)
   private[this] var _future = Option.empty[ScheduledFuture[_]]
   private[this] val _task = new Runnable {
-    override def run() {
-      future {
-        _delegate.pulse(_term)
-      }
-    }
+    override def run() = future(_delegate.pulse(_term))
   }
 
   /** ExecutionContext for scala futures */

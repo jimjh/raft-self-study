@@ -22,6 +22,7 @@ trait ServerComponent {
   this: ConsensusServiceComponent
     with ClientServiceComponent
     with LogComponent
+    with PersistenceComponent
     with ElectionTimerComponent =>
 
   /** Starts various components.

@@ -99,7 +99,7 @@ class Follower(override val id: String,
     // walk backwards until log index is found
     _log.findLast(prevLogIndex, prevLogTerm).fold(false) {
       root =>
-        _logger.info(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
+        _logger.debug(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
         _log.appendEntries(term, entries, root)
         true
     }

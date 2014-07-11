@@ -92,7 +92,7 @@ trait LogComponent {
     def commit_=(index: Long) {
       _commitLock {
         if (index > commit) {
-          logger.info(s"Advancing commit from $commit to $index.")
+          logger.debug(s"Advancing commit from $commit to $index.")
           _commit = index
           _hasCommits.signalAll()
         }
@@ -112,6 +112,7 @@ trait LogComponent {
                args: Seq[String] = Array.empty[String],
                promise: Option[Promise[ReturnType]] = None,
                from: LogEntry = _last): LogEntry = _logs.synchronized {
+      logger.trace(s"Appending new entry after index ${from.index} with command $cmd.")
       _last = from <<(term, from.index + 1, cmd, args, promise)
       _last
     }
@@ -119,6 +120,7 @@ trait LogComponent {
     def appendEntries(term: Long,
                entries: Seq[com.jimjh.raft.rpc.Entry],
                from: LogEntry = _last) = _logs.synchronized {
+      logger.trace(s"Appending multiple entries after index ${from.index}.")
       var prev = from
       for (entry <- entries) {
         _last = prev <<(term, prev.index + 1, entry.cmd, entry.args)

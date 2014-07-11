@@ -47,7 +47,7 @@ class Harness {
     props.put("node.id", s"localhost:$port")
     props.put("peers", peers)
 
-    val raft = new RaftServer(app(), props)
+    val raft = new EphemeralRaft(app(), props)
     _logger.debug(s"launching consensus service @ $port...")
     raft.start()
     raft

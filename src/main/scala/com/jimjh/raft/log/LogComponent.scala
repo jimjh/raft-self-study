@@ -71,7 +71,7 @@ trait LogComponent {
     private[this] val _applicator = new Thread(new Runnable {
       // [IMPORTANT] this should be the only thread that has write access to _lastApplied
       override def run() = {
-        Thread.currentThread().setName("LogApplicator")
+        Thread.currentThread().setName("raft.LogApplicator")
         logger.trace("LogApplicator started.")
         keepApplying()
       }

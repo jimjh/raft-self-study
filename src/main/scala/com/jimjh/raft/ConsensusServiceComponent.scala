@@ -3,10 +3,10 @@ package com.jimjh.raft
 import java.util.Properties
 
 import com.jimjh.raft.log.LogComponent
+import com.jimjh.raft.node.State._
 import com.jimjh.raft.node.{Machine, Node, State}
 import com.jimjh.raft.rpc.RaftConsensusService.FutureIface
 import com.jimjh.raft.rpc.{Entry, RaftConsensusService, Vote}
-import State._
 import com.twitter.finagle.Thrift
 import com.twitter.util.{Future, Promise, Try}
 import com.typesafe.scalalogging.slf4j.Logger
@@ -71,7 +71,6 @@ trait ConsensusServiceComponent {
     /** Map of node IDs to thrift clients. */
     private[this] val _peers = extractPeers(_props getProperty "peers")
 
-    // TODO restart from file
     @volatile
     private[this] var _node: Node = null
 
@@ -88,7 +87,8 @@ trait ConsensusServiceComponent {
       logger.debug(s"Received RequestVote($term, $candidateId, $lastLogIndex, $lastLogTerm)")
       new Promise(Try {
         val vote = _node.requestVote(term, candidateId, lastLogIndex, lastLogTerm)
-        if (vote.granted) { // avoid starting an election if one is in progress (optional)
+        if (vote.granted) {
+          // avoid starting an election if one is in progress (optional)
           timer.restart()
           persist()
         }
@@ -161,7 +161,7 @@ trait ConsensusServiceComponent {
 
     /** Sets `_node` to contents from saved state, discarding any existing nodes. */
     private[this] def recover: Option[Node] = {
-      persistence.read[(Long, Option[String])] match {
+      persistence.readNode[(Long, Option[String])] match {
         case Some((term, vote)) =>
           Some(new node.Follower(id, term, log, vote))
         case None =>
@@ -171,7 +171,7 @@ trait ConsensusServiceComponent {
 
     private[this] def persist() {
       logger.debug(s"PERSIST term: ${_node.term}, votedFor: ${_node.votedFor}")
-      persistence.write((_node.term, _node.votedFor))
+      persistence.writeNode((_node.term, _node.votedFor))
     }
 
     /** Converts comma-separated host ports into a map.
@@ -185,5 +185,4 @@ trait ConsensusServiceComponent {
       }.toMap - id
     }
   }
-
 }

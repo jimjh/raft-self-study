@@ -16,8 +16,12 @@ class EphemeralRaft(_delegate: Application,
 }
 
 trait EphemeralComponent extends PersistenceComponent {
+
   class Ephemeral(_props: Properties) extends Persistence(_props) {
-    override def write(o: Serializable) {} // do nothing
-    override def read[T]: Option[T] = None
+    override def writeNode(o: Serializable) {}
+
+    // do nothing
+    override def readNode[T]: Option[T] = None
   }
+
 }

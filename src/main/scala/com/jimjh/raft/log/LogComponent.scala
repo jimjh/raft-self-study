@@ -3,8 +3,8 @@ package com.jimjh.raft.log
 import java.util.concurrent.locks.ReentrantLock
 
 import com.jimjh.raft._
+import com.jimjh.raft.annotation.threadsafe
 import com.typesafe.scalalogging.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Promise}
@@ -16,9 +16,12 @@ import scala.language.{implicitConversions, postfixOps}
   */
 trait LogComponent {
 
-  val log: Log
+  val log: Log // #injectable
 
-  protected[raft] val logger: Logger = Logger(LoggerFactory getLogger "Log")
+  val persistence: PersistenceComponent#Persistence // #injected
+
+  /** slf4j logger. */
+  protected[raft] val logger: Logger // #injected
 
   implicit def toSugaredLock(lock: ReentrantLock) = new SugaredLock(lock)
 
@@ -42,8 +45,12 @@ trait LogComponent {
     *   log.append(w)
     * }}}
     *
+    * @todo TODO persistent state using append, flush
+    * @todo TODO initialize from persisted state
+    *
     * @param _delegate target application to which commands are forwarded
     */
+  @threadsafe
   class Log(_delegate: Application) {
 
     notNull(_delegate, "_delegate")
@@ -114,16 +121,18 @@ trait LogComponent {
                from: LogEntry = _last): LogEntry = _logs.synchronized {
       logger.trace(s"Appending new entry after index ${from.index} with command $cmd.")
       _last = from <<(term, from.index + 1, cmd, args, promise)
+      persistence.appendLog(_last)
       _last
     }
 
     def appendEntries(term: Long,
-               entries: Seq[com.jimjh.raft.rpc.Entry],
-               from: LogEntry = _last) = _logs.synchronized {
+                      entries: Seq[com.jimjh.raft.rpc.Entry],
+                      from: LogEntry = _last) = _logs.synchronized {
       logger.trace(s"Appending multiple entries after index ${from.index}.")
       var prev = from
       for (entry <- entries) {
         _last = prev <<(term, prev.index + 1, entry.cmd, entry.args)
+        persistence.appendLog(_last)
         prev = _last
       }
       _last
@@ -148,8 +157,13 @@ trait LogComponent {
       this
     }
 
+    /** Stops the background task.
+      *
+      * @return this
+      */
     def stop() = {
       _applicator.interrupt()
+      this
     }
 
     /** Keeps applying logs until [[commit]], then waits. */

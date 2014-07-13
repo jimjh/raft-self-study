@@ -1,6 +1,7 @@
 package com.jimjh.raft.log
 
 import com.jimjh.raft._
+import com.jimjh.raft.annotation.threadsafe
 
 import scala.concurrent._
 import scala.concurrent.duration._
@@ -9,24 +10,24 @@ import scala.language.postfixOps
 /** Skeletal implementation of a linked list.
   *
   * Only nextF and nextP may be mutable. All other fields, including prev, are immutable. The start of the list is
-  * called a _sentinel_, which is a special entry that points to itself.
-  *
-  * @todo TODO persistent state using append, flush
-  * @todo TODO initialize from persisted state
+  * called a *sentinel*, which is a special entry that points to itself.
   *
   * @param term term during which this entry was created
   * @param index log index
   * @param result optional promise that will be fulfilled after `cmd` is applied
   * @param _prev previous log entry
   */
+@threadsafe
 class LogEntry(val term: Long,
                val index: Long,
                val cmd: String,
                val args: Seq[String] = Array.empty[String],
-               val result: Option[Promise[ReturnType]] = None,
-               private[this] var _prev: LogEntry = LogEntry.sentinel)
-  extends Ordered[LogEntry] {
+               @transient val result: Option[Promise[ReturnType]] = None,
+               @transient private[this] var _prev: LogEntry = LogEntry.sentinel)
+  extends Ordered[LogEntry]
+  with Serializable {
 
+  @transient
   @volatile
   private[this] var _nextP = promise[LogEntry]()
 

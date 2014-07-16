@@ -129,6 +129,12 @@ trait ConsensusServiceComponent {
       server
     }
 
+    def stop() = {
+      logger.info("Stopping consensus service")
+      timer.cancel()
+      // TODO close thrift server
+    }
+
     def apply(cmd: String, args: Seq[String]) = {
       val p = promise[ReturnType]()
       log.append(_node.term, cmd, args, Some(p))

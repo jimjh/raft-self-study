@@ -29,8 +29,7 @@ class LogSpec
   val AnyArgs = "arg1" :: Nil
 
   override val log = null
-  override val persistence = ???
-  // FIXME
+  override val persistence = ??? // FIXME
   override val logger = null // FIXME
 
   "An empty log" when {
@@ -111,7 +110,7 @@ class LogSpec
     "stopped" should {
       val log = populatedLog
       "stop without errors" in {
-        log.stop()
+        log.close()
       }
     }
 

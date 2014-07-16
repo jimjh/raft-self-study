@@ -1,11 +1,13 @@
 package com.jimjh.raft
 
-import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
+import java.io.{Closeable, IOException, ObjectInputStream, ObjectOutputStream}
 import java.nio.file.StandardOpenOption._
 import java.nio.file.{Files, Paths}
 import java.util.Properties
 
 import org.apache.commons.io.IOUtils
+
+import scala.util.Try
 
 /** Provides an implementation of `Persistence` for persisting node state and the log.
   *
@@ -13,9 +15,7 @@ import org.apache.commons.io.IOUtils
   */
 trait PersistenceComponent {
 
-  val persistence: Persistence
-
-  // #injectable
+  val persistence: Persistence // #injectable
 
   /** Serializes and de-serializes node state and the log to disk.
     *
@@ -24,7 +24,7 @@ trait PersistenceComponent {
     *
     * @param _props configuration options for persistence
     */
-  class Persistence(_props: Properties) {
+  class Persistence(_props: Properties) extends Closeable {
 
     // TODO add validation, CRC32
     Files.createDirectories(dir)
@@ -33,7 +33,8 @@ trait PersistenceComponent {
 
     private[this] val _logPath = dir.resolve(Persistence.LogFile)
 
-    private[this] val _logStream = newLogStream
+    private[this] val _logInput = openLogInput
+    private[this] val _logOutput = openLogOutput
 
     /** Serializes `o` to `_nodePath`.
       *
@@ -68,20 +69,68 @@ trait PersistenceComponent {
       }
     }
 
+    /** Appends a single log entry to [[Persistence.LogFile]].
+      *
+      * @param o object to be serialized
+      */
     def appendLog(o: Serializable) {
-      _logStream writeObject o
-      _logStream.flush()
+      _logOutput writeObject ("a", o)
+      _logOutput.flush()
     }
 
-    def closeLog() {
-      IOUtils closeQuietly _logStream
+    /** De-serializes log entries from [[Persistence.LogFile]].
+      *
+      * How I might use it
+      * {{{
+      *   loop
+      *     read log entry
+      *     if None, break
+      *     modify previous log entry
+      *   end
+      * }}}
+      *
+      * @tparam T type of object to return
+      * @return de-serialized object, casted to `T`
+      */
+    def readLog[T]: Iterator[T] =
+      new Iterator[T] {
+        var _next: Try[T] = tryNext
+
+        override def hasNext = _next.isSuccess
+
+        override def next() = {
+          val curr = _next.get
+          _next = tryNext
+          curr
+        }
+
+        private[this] def tryNext =
+          _logInput flatMap (stream => Try(stream.readObject().asInstanceOf[T]))
+      }
+
+    /** Marks a truncation in the log.
+      *
+      * @param index index of the entry whose successor was cut
+      */
+    def truncateLog(index: Long) = {
+      _logOutput writeObject ("t", index)
+      _logOutput.flush()
+    }
+
+    def close() {
+      _logInput.map(IOUtils closeQuietly _)
+      IOUtils closeQuietly _logOutput
     }
 
     private[this] def dir =
       Paths.get(_props.getProperty("data.dir"), _props.getProperty("node.id"))
 
-    private[this] def newLogStream =
-      new ObjectOutputStream(Files.newOutputStream(_logPath, CREATE, WRITE, TRUNCATE_EXISTING))
+    private[this] def openLogInput = Try {
+      new ObjectInputStream(Files.newInputStream(_logPath, READ))
+    }
+
+    private[this] def openLogOutput = // let any IOExceptions bubble up
+      new ObjectOutputStream(Files.newOutputStream(_logPath, CREATE, APPEND))
   }
 
   object Persistence {

@@ -20,7 +20,7 @@ object TestMain {
 
     val servers = (8080 to 8082) map TestMain.newServer
 
-    Thread.sleep(5000)
+    Thread.sleep(7000)
     logger.info("WAKE")
 
     servers.filter {

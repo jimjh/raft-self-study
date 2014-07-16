@@ -1,5 +1,6 @@
 package com.jimjh.raft.log
 
+import java.io.Closeable
 import java.util.concurrent.locks.ReentrantLock
 
 import com.jimjh.raft._
@@ -18,7 +19,7 @@ trait LogComponent {
 
   val log: Log // #injectable
 
-  val persistence: PersistenceComponent#Persistence // #injected
+  implicit val persistence: PersistenceComponent#Persistence // #injected
 
   /** slf4j logger. */
   protected[raft] val logger: Logger // #injected
@@ -45,13 +46,12 @@ trait LogComponent {
     *   log.append(w)
     * }}}
     *
-    * @todo TODO persistent state using append, flush
     * @todo TODO initialize from persisted state
     *
     * @param _delegate target application to which commands are forwarded
     */
   @threadsafe
-  class Log(_delegate: Application) {
+  class Log(_delegate: Application) extends Closeable {
 
     notNull(_delegate, "_delegate")
 
@@ -120,19 +120,17 @@ trait LogComponent {
                promise: Option[Promise[ReturnType]] = None,
                from: LogEntry = _last): LogEntry = _logs.synchronized {
       logger.trace(s"Appending new entry after index ${from.index} with command $cmd.")
-      _last = from <<(term, from.index + 1, cmd, args, promise)
-      persistence.appendLog(_last)
+      _last = from <<(term, cmd, args, promise)
       _last
     }
 
     def appendEntries(term: Long,
                       entries: Seq[com.jimjh.raft.rpc.Entry],
                       from: LogEntry = _last) = _logs.synchronized {
-      logger.trace(s"Appending multiple entries after index ${from.index}.")
+      logger.trace(s"Appending entries after index ${from.index}.")
       var prev = from
       for (entry <- entries) {
-        _last = prev <<(term, prev.index + 1, entry.cmd, entry.args)
-        persistence.appendLog(_last)
+        _last = prev <<(term, entry.cmd, entry.args)
         prev = _last
       }
       _last
@@ -153,6 +151,7 @@ trait LogComponent {
       * @return this
       */
     def start() = {
+      rebuild()
       _applicator.start()
       this
     }
@@ -161,9 +160,16 @@ trait LogComponent {
       *
       * @return this
       */
-    def stop() = {
+    override def close() = {
       _applicator.interrupt()
-      this
+    }
+
+    /** Rebuilds log from disk contents. */
+    private[this] def rebuild() = {
+      persistence.readLog[(String, LogEntry)].foreach {
+        entry =>
+          // TODO
+      }
     }
 
     /** Keeps applying logs until [[commit]], then waits. */

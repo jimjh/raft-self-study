@@ -1,6 +1,7 @@
 package com.jimjh.raft
 
 import com.jimjh.raft.log.LogComponent
+import org.apache.commons.io.IOUtils
 
 /** Wrapper for a RAFT server. Controls two Finagle Services - one for handling client requests, and one for handling
   * requests from other servers.
@@ -32,5 +33,10 @@ trait ServerComponent {
   def start() = {
     log.start()
     consensus.start()
+  }
+
+  def stop() = {
+    IOUtils closeQuietly log
+    IOUtils closeQuietly persistence
   }
 }

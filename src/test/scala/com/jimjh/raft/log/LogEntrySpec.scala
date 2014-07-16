@@ -52,8 +52,9 @@ class LogEntrySpec extends FluentSpec {
     }
 
     "appended" should {
+      implicit val persistence = null
       val first = LogEntry(term, index, cmd)
-      val second = first << (term, index+1, cmd)
+      val second = first << (term, cmd) // FIXME
 
       "be last" in {
         first shouldNot be ('last)

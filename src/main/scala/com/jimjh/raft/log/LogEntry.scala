@@ -31,17 +31,21 @@ class LogEntry(val term: Long,
   @volatile
   private[this] var _nextP = promise[LogEntry]()
 
+  private[this] type Persistence = PersistenceComponent#Persistence
+
   override def compare(other: LogEntry) = index compare other.index
 
   /** Appends `elem` to the list and returns its wrapper node. */
   def <<(term: Long,
-         index: Long,
          cmd: String,
          args: Seq[String] = Array.empty[String],
-         promise: Option[Promise[ReturnType]] = None) = {
+         promise: Option[Promise[ReturnType]] = None)
+        (implicit persistence: Persistence) = {
     if (_nextP.isCompleted) truncate()
-    val node = LogEntry(term, index, cmd, args, promise, this)
-    _nextP.success(node)
+    val node = LogEntry(term, index + 1, cmd, args, promise, this)
+
+    persistence appendLog node
+    _nextP success node
     node
   }
 
@@ -66,10 +70,13 @@ class LogEntry(val term: Long,
     result
   }
 
+  override def toString = (term, index, cmd, args).toString()
+
   /** @return previous log entry */
   protected[raft] def prev = _prev
 
-  private[this] def truncate() {
+  private[this] def truncate()(implicit persistence: Persistence) {
+    persistence truncateLog index
     var ptr = this
     while (!ptr.isLast) ptr = Await.result(ptr.nextF, 0 nanos)
     ptr.nextP.failure(new TruncatedLogException)

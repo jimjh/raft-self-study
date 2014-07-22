@@ -5,6 +5,7 @@ import java.nio.file.StandardOpenOption._
 import java.nio.file.{Files, Paths}
 import java.util.Properties
 
+import com.jimjh.raft.log.LogEntry
 import org.apache.commons.io.IOUtils
 
 import scala.util.Try
@@ -14,8 +15,6 @@ import scala.util.Try
   * @author Jim Lim - jim@jimjh.com
   */
 trait PersistenceComponent {
-
-  val persistence: Persistence // #injectable
 
   /** Serializes and de-serializes node state and the log to disk.
     *
@@ -71,42 +70,30 @@ trait PersistenceComponent {
 
     /** Appends a single log entry to [[Persistence.LogFile]].
       *
-      * @param o object to be serialized
+      * @param entry object to be serialized
       */
-    def appendLog(o: Serializable) {
-      _logOutput writeObject ("a", o)
+    def appendLog(entry: LogEntry) {
+      _logOutput writeObject ("a", entry)
       _logOutput.flush()
     }
 
-    /** De-serializes log entries from [[Persistence.LogFile]].
-      *
-      * How I might use it
-      * {{{
-      *   loop
-      *     read log entry
-      *     if None, break
-      *     modify previous log entry
-      *   end
-      * }}}
-      *
-      * @tparam T type of object to return
-      * @return de-serialized object, casted to `T`
-      */
-    def readLog[T]: Iterator[T] =
-      new Iterator[T] {
-        var _next: Try[T] = tryNext
-
-        override def hasNext = _next.isSuccess
-
-        override def next() = {
-          val curr = _next.get
-          _next = tryNext
-          curr
-        }
-
-        private[this] def tryNext =
-          _logInput flatMap (stream => Try(stream.readObject().asInstanceOf[T]))
+    def rebuildLog: LogEntry = {
+      val root = LogEntry.sentinel
+      var prev = root
+      readLog[(String, LogEntry)].foreach {
+        case ("a", entry) =>
+          prev.nextP success entry
+          entry._prev = prev // FIXME bad scope
+          prev = entry
+        case ("t", entry) =>
+          // walk backwards until index <= entry.index
+          while (prev.index > entry.index) prev = prev._prev // FIXME bad scope
+          prev.nextP success entry
+          entry._prev = prev
+          prev = entry
       }
+      root
+    }
 
     /** Marks a truncation in the log.
       *
@@ -131,6 +118,36 @@ trait PersistenceComponent {
 
     private[this] def openLogOutput = // let any IOExceptions bubble up
       new ObjectOutputStream(Files.newOutputStream(_logPath, CREATE, APPEND))
+
+    /** De-serializes log entries from [[Persistence.LogFile]].
+      *
+      * How I might use it
+      * {{{
+      *   loop
+      *     read log entry
+      *     if None, break
+      *     modify previous log entry
+      *   end
+      * }}}
+      *
+      * @tparam T type of object to return
+      * @return de-serialized object, casted to `T`
+      */
+    private def readLog[T]: Iterator[T] =
+      new Iterator[T] {
+        var _next: Try[T] = tryNext
+
+        override def hasNext = _next.isSuccess
+
+        override def next() = {
+          val curr = _next.get
+          _next = tryNext
+          curr
+        }
+
+        private[this] def tryNext =
+          _logInput flatMap (stream => Try(stream.readObject().asInstanceOf[T]))
+      }
   }
 
   object Persistence {

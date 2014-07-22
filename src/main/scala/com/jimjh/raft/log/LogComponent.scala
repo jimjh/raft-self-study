@@ -166,10 +166,7 @@ trait LogComponent {
 
     /** Rebuilds log from disk contents. */
     private[this] def rebuild() = {
-      persistence.readLog[(String, LogEntry)].foreach {
-        entry =>
-          // TODO
-      }
+      // TODO
     }
 
     /** Keeps applying logs until [[commit]], then waits. */

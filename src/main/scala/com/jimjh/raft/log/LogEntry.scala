@@ -1,5 +1,7 @@
 package com.jimjh.raft.log
 
+import java.io.ObjectStreamException
+
 import com.jimjh.raft._
 import com.jimjh.raft.annotation.threadsafe
 
@@ -23,7 +25,7 @@ class LogEntry(val term: Long,
                val cmd: String,
                val args: Seq[String] = Array.empty[String],
                @transient val result: Option[Promise[ReturnType]] = None,
-               @transient private[this] var _prev: LogEntry = LogEntry.sentinel)
+               @transient private[raft] var _prev: LogEntry = LogEntry.sentinel)
   extends Ordered[LogEntry]
   with Serializable {
 
@@ -68,6 +70,12 @@ class LogEntry(val term: Long,
     val ret = _delegate(cmd, args)
     result.map(_.success(ret))
     result
+  }
+
+  @throws(classOf[ObjectStreamException])
+  def readResolve: Object = {
+    // re-initialize transient members
+    LogEntry(term, index, cmd, args)
   }
 
   override def toString = (term, index, cmd, args).toString()

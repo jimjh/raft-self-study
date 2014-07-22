@@ -17,11 +17,11 @@ object LogPersistenceMain extends PersistenceComponent {
     props
   }
 
-  override val persistence: LogPersistenceMain.Persistence = new Persistence(props)
+  val persistence: LogPersistenceMain.Persistence = new Persistence(props)
 
   def main(args: Array[String]) = {
     try {
-      persistence.readLog[(String, LogEntry)].foreach(println(_))
+      // persistence.readLog[(String, LogEntry)].foreach(println(_))
     } finally persistence.close()
   }
 }

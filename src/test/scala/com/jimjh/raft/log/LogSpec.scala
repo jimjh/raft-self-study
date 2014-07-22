@@ -15,6 +15,7 @@ class LogSpec
   // dummy application that just prepends commands to a sequence
   class Delegate extends Application {
     var history = List[String]()
+
     override def apply(cmd: String, args: Seq[String]): Option[Any] = {
       history = cmd +: history
       None
@@ -25,9 +26,11 @@ class LogSpec
 
   val AnyTerm = 5
   val AnyCommand = "any.command"
-  val AnyArgs = "arg1"::Nil
+  val AnyArgs = "arg1" :: Nil
 
   override val log = null
+  override val persistence = ??? // FIXME
+  override val logger = null // FIXME
 
   "An empty log" when {
 
@@ -107,7 +110,7 @@ class LogSpec
     "stopped" should {
       val log = populatedLog
       "stop without errors" in {
-        log.stop()
+        log.close()
       }
     }
 

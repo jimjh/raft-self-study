@@ -19,7 +19,7 @@ class Leader(override val id: String,
 
   override val _logger = Logger(LoggerFactory getLogger s"Leader:$id")
 
-  override val state = Leader
+  override val state = Ldr
 
   /** Ordered set of match indexes for each peer, stored as `(id, match index)`. */
   private[this] val _matches = new mutable.TreeSet[Match]()
@@ -43,7 +43,7 @@ class Leader(override val id: String,
         false
       case 1 =>
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .appendEntries(reqTerm, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
     }
   }
@@ -59,7 +59,7 @@ class Leader(override val id: String,
         Vote(reqTerm, granted = false)
       case 1 => // new election
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .requestVote(reqTerm, candidateId, lastLogIndex, lastLogTerm)
     }
   }
@@ -80,15 +80,15 @@ class Leader(override val id: String,
     */
   override def transition(to: State, newTerm: Long): Node = {
     to match {
-      case Follower =>
+      case Fol =>
         require(newTerm > term)
         stop()
         new Follower(id, newTerm, _log)
-      case Candidate =>
+      case Cand =>
         require(newTerm > term)
         stop()
         new Candidate(id, newTerm, _log)
-      case Leader =>
+      case Ldr =>
         throw new IllegalArgumentException("Refusing to transition from leader to leader.")
     }
   }

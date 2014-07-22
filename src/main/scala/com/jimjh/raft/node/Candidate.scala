@@ -21,7 +21,7 @@ class Candidate(override val id: String,
 
   override val _logger = Logger(LoggerFactory getLogger s"Candidate:$id")
 
-  override val state = Candidate
+  override val state = Cand
 
   override def votedFor = Some(id)
 
@@ -35,13 +35,13 @@ class Candidate(override val id: String,
 
   override def transition(to: State, newTerm: Long) = {
     to match {
-      case Follower =>
+      case Fol =>
         require(newTerm >= term)
         new Follower(id, newTerm, _log)
-      case Candidate =>
+      case Cand =>
         require(newTerm > term)
         new Candidate(id, newTerm, _log)
-      case Leader =>
+      case Ldr =>
         require(newTerm >= term)
         new Leader(id, newTerm, _log)
     }
@@ -59,7 +59,7 @@ class Candidate(override val id: String,
         false
       case 0 | 1 => // new leader
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .appendEntries(reqTerm, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
     }
   }
@@ -74,7 +74,7 @@ class Candidate(override val id: String,
         Vote(reqTerm, granted = false)
       case 1 => // new election
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .requestVote(reqTerm, candidateId, lastLogIndex, lastLogTerm)
     }
   }
@@ -101,7 +101,7 @@ class Candidate(override val id: String,
 
   override def timeout(implicit machine: Machine) {
     _logger.info(s"Election timeout triggered. Current state is $state for term $term.")
-    machine.become(Candidate, term + 1)
+    machine.become(Cand, term + 1)
   }
 
   /** Adds the given vote to the current tally.
@@ -118,7 +118,7 @@ class Candidate(override val id: String,
     if (vote == Vote(term, granted = true)) {
       votes += ((id, true))
       // TODO test that this doesn't get called multiple times
-      if (votes.size >= req) machine.become(Leader, term)
+      if (votes.size >= req) machine.become(Ldr, term)
     }
   }
 }

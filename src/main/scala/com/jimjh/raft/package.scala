@@ -47,9 +47,12 @@ package object raft {
     with ConsensusServiceComponent
     with ClientServiceComponent
     with LogComponent
+    with PersistenceComponent
     with ElectionTimerComponent {
 
     override val log = new Log(_delegate)
+
+    override val persistence = new Persistence(_props)
 
     override val consensus: ConsensusService =
       new ConsensusService(

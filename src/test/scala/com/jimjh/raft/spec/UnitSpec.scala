@@ -10,3 +10,4 @@ abstract class UnitSpec
   with Eventually
   with SpanSugar
   with Conductors
+  with BeforeAndAfter

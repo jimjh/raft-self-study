@@ -1,10 +1,11 @@
 package com.jimjh.raft.log
 
+import java.io.Closeable
 import java.util.concurrent.locks.ReentrantLock
 
 import com.jimjh.raft._
+import com.jimjh.raft.annotation.threadsafe
 import com.typesafe.scalalogging.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Promise}
@@ -16,9 +17,12 @@ import scala.language.{implicitConversions, postfixOps}
   */
 trait LogComponent {
 
-  val log: Log
+  val log: Log // #injectable
 
-  protected[raft] val logger: Logger = Logger(LoggerFactory getLogger "Log")
+  implicit val persistence: PersistenceComponent#Persistence // #injected
+
+  /** slf4j logger. */
+  protected[raft] val logger: Logger // #injected
 
   implicit def toSugaredLock(lock: ReentrantLock) = new SugaredLock(lock)
 
@@ -42,9 +46,12 @@ trait LogComponent {
     *   log.append(w)
     * }}}
     *
+    * @todo TODO initialize from persisted state
+    *
     * @param _delegate target application to which commands are forwarded
     */
-  class Log(_delegate: Application) {
+  @threadsafe
+  class Log(_delegate: Application) extends Closeable {
 
     notNull(_delegate, "_delegate")
 
@@ -71,7 +78,7 @@ trait LogComponent {
     private[this] val _applicator = new Thread(new Runnable {
       // [IMPORTANT] this should be the only thread that has write access to _lastApplied
       override def run() = {
-        Thread.currentThread().setName("LogApplicator")
+        Thread.currentThread().setName("raft.LogApplicator")
         logger.trace("LogApplicator started.")
         keepApplying()
       }
@@ -92,7 +99,7 @@ trait LogComponent {
     def commit_=(index: Long) {
       _commitLock {
         if (index > commit) {
-          logger.info(s"Advancing commit from $commit to $index.")
+          logger.debug(s"Advancing commit from $commit to $index.")
           _commit = index
           _hasCommits.signalAll()
         }
@@ -112,16 +119,18 @@ trait LogComponent {
                args: Seq[String] = Array.empty[String],
                promise: Option[Promise[ReturnType]] = None,
                from: LogEntry = _last): LogEntry = _logs.synchronized {
-      _last = from <<(term, from.index + 1, cmd, args, promise)
+      logger.trace(s"Appending new entry after index ${from.index} with command $cmd.")
+      _last = from <<(term, cmd, args, promise)
       _last
     }
 
     def appendEntries(term: Long,
-               entries: Seq[com.jimjh.raft.rpc.Entry],
-               from: LogEntry = _last) = _logs.synchronized {
+                      entries: Seq[com.jimjh.raft.rpc.Entry],
+                      from: LogEntry = _last) = _logs.synchronized {
+      logger.trace(s"Appending entries after index ${from.index}.")
       var prev = from
       for (entry <- entries) {
-        _last = prev <<(term, prev.index + 1, entry.cmd, entry.args)
+        _last = prev <<(term, entry.cmd, entry.args)
         prev = _last
       }
       _last
@@ -142,12 +151,22 @@ trait LogComponent {
       * @return this
       */
     def start() = {
+      rebuild()
       _applicator.start()
       this
     }
 
-    def stop() = {
+    /** Stops the background task.
+      *
+      * @return this
+      */
+    override def close() = {
       _applicator.interrupt()
+    }
+
+    /** Rebuilds log from disk contents. */
+    private[this] def rebuild() = {
+      // TODO
     }
 
     /** Keeps applying logs until [[commit]], then waits. */

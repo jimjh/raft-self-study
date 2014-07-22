@@ -20,7 +20,7 @@ object TestMain {
 
     val servers = (8080 to 8082) map TestMain.newServer
 
-    Thread.sleep(5000)
+    Thread.sleep(7000)
     logger.info("WAKE")
 
     servers.filter {
@@ -43,6 +43,7 @@ object TestMain {
   def newServer(port: Int) = {
     val props = new Properties()
     props.put("node.id", s"localhost:$port")
+    props.put("data.dir", s"/tmp/raft")
     props.put("peers", "localhost:8080,localhost:8081,localhost:8082")
     val raft = new RaftServer(DummyApplication, props)
     (raft, raft.start())

@@ -13,13 +13,12 @@ import org.slf4j.LoggerFactory
   */
 class Follower(override val id: String,
                override val term: Long,
-               _log: LogComponent#Log) extends Node {
+               _log: LogComponent#Log,
+               private[this] var _votedFor: Option[String] = None) extends Node {
 
   override val _logger = Logger(LoggerFactory getLogger s"Follower:$id")
 
-  override val state = Follower
-
-  private[this] var _votedFor = Option.empty[String]
+  override val state = Fol
 
   override def votedFor = _votedFor
 
@@ -27,13 +26,13 @@ class Follower(override val id: String,
 
   override def transition(to: State, newTerm: Long = term + 1) = {
     to match {
-      case Follower =>
+      case Fol =>
         require(newTerm > term)
         new Follower(id, newTerm, _log)
-      case Candidate =>
+      case Cand =>
         require(newTerm >= term)
         new Candidate(id, newTerm, _log)
-      case Leader =>
+      case Ldr =>
         throw new IllegalArgumentException("Refusing to transition from follower to leader.")
     }
   }
@@ -54,7 +53,7 @@ class Follower(override val id: String,
         }
       case 1 => // new leader
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .requestVote(reqTerm, candidateId, lastLogIndex, lastLogTerm)
     }
   }
@@ -73,14 +72,14 @@ class Follower(override val id: String,
         entries.isEmpty || replicateEntries(term, prevLogIndex, prevLogTerm, entries)
       case 1 => // new leader
         machine
-          .become(Follower, reqTerm)
+          .become(Fol, reqTerm)
           .appendEntries(reqTerm, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
     }
   }
 
   override def timeout(implicit machine: Machine) = {
     _logger.info(s"Election timeout triggered. Current state is $state for term $term.")
-    machine.become(Candidate, term + 1)
+    machine.become(Cand, term + 1)
   }
 
   /** @return true iff the given request deserves a vote */
@@ -100,7 +99,7 @@ class Follower(override val id: String,
     // walk backwards until log index is found
     _log.findLast(prevLogIndex, prevLogTerm).fold(false) {
       root =>
-        _logger.info(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
+        _logger.debug(s"Replicating log entries for term $term with prevIndex $prevLogIndex")
         _log.appendEntries(term, entries, root)
         true
     }

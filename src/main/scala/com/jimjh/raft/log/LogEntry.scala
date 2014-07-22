@@ -1,6 +1,9 @@
 package com.jimjh.raft.log
 
+import java.io.ObjectStreamException
+
 import com.jimjh.raft._
+import com.jimjh.raft.annotation.threadsafe
 
 import scala.concurrent._
 import scala.concurrent.duration._
@@ -9,38 +12,42 @@ import scala.language.postfixOps
 /** Skeletal implementation of a linked list.
   *
   * Only nextF and nextP may be mutable. All other fields, including prev, are immutable. The start of the list is
-  * called a _sentinel_, which is a special entry that points to itself.
-  *
-  * @todo TODO persistent state using append, flush
-  * @todo TODO initialize from persisted state
+  * called a *sentinel*, which is a special entry that points to itself.
   *
   * @param term term during which this entry was created
   * @param index log index
   * @param result optional promise that will be fulfilled after `cmd` is applied
   * @param _prev previous log entry
   */
+@threadsafe
 class LogEntry(val term: Long,
                val index: Long,
                val cmd: String,
                val args: Seq[String] = Array.empty[String],
-               val result: Option[Promise[ReturnType]] = None,
-               private[this] var _prev: LogEntry = LogEntry.sentinel)
-  extends Ordered[LogEntry] {
+               @transient val result: Option[Promise[ReturnType]] = None,
+               @transient private[raft] var _prev: LogEntry = LogEntry.sentinel)
+  extends Ordered[LogEntry]
+  with Serializable {
 
+  @transient
   @volatile
   private[this] var _nextP = promise[LogEntry]()
+
+  private[this] type Persistence = PersistenceComponent#Persistence
 
   override def compare(other: LogEntry) = index compare other.index
 
   /** Appends `elem` to the list and returns its wrapper node. */
   def <<(term: Long,
-         index: Long,
          cmd: String,
          args: Seq[String] = Array.empty[String],
-         promise: Option[Promise[ReturnType]] = None) = {
+         promise: Option[Promise[ReturnType]] = None)
+        (implicit persistence: Persistence) = {
     if (_nextP.isCompleted) truncate()
-    val node = LogEntry(term, index, cmd, args, promise, this)
-    _nextP.success(node)
+    val node = LogEntry(term, index + 1, cmd, args, promise, this)
+
+    persistence appendLog node
+    _nextP success node
     node
   }
 
@@ -65,10 +72,19 @@ class LogEntry(val term: Long,
     result
   }
 
+  @throws(classOf[ObjectStreamException])
+  def readResolve: Object = {
+    // re-initialize transient members
+    LogEntry(term, index, cmd, args)
+  }
+
+  override def toString = (term, index, cmd, args).toString()
+
   /** @return previous log entry */
   protected[raft] def prev = _prev
 
-  private[this] def truncate() {
+  private[this] def truncate()(implicit persistence: Persistence) {
+    persistence truncateLog index
     var ptr = this
     while (!ptr.isLast) ptr = Await.result(ptr.nextF, 0 nanos)
     ptr.nextP.failure(new TruncatedLogException)
